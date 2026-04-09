@@ -29,8 +29,8 @@ A high-performance, production-ready web scraper for extracting product data fro
 
 ```bash
 # Clone the repository
-git clone https://github.com/2parser/mediamarkt-parser.git
-cd mediamarkt-parser
+git clone https://github.com/2scraper/mediamarkt-scraper.git
+cd mediamarkt-scraper
 
 # Install dependencies
 pip install -r requirements.txt
@@ -352,8 +352,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Captcha Solving**: [2captcha.com](https://2captcha.com)
 - **Proxy Service**: [2prx.com](https://2prx.com)
-- **Issues**: [GitHub Issues](https://github.com/2parser/mediamarkt-parser/issues)
-- **Documentation**: [Wiki](https://github.com/2parser/mediamarkt-parser/wiki)
+- **Issues**: [GitHub Issues](https://github.com/2scraper/mediamarkt-scraper/issues)
+- **Documentation**: [Wiki](https://github.com/2scraper/mediamarkt-scraper/wiki)
 
 ---
 
