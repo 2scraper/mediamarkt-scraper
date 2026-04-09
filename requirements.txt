@@ -1,5 +1,5 @@
 # MediaMarkt Scraper Dependencies
-# https://github.com/2parser/mediamarkt-parser
+# https://github.com/2scraper/mediamarkt-scraper
 
 # ============================================
 # Playwright (Recommended)
