@@ -5,7 +5,7 @@ MediaMarkt Scraper - Puppeteer (Pyppeteer) Edition
 High-performance web scraper for MediaMarkt product data.
 Supports all categories, anti-detection, captcha solving, and proxy rotation.
 
-GitHub: https://github.com/2parser/mediamarkt-parser
+GitHub: https://github.com/2scraper/mediamarkt-scraper
 Captcha Solving: https://2captcha.com
 Proxy Service: https://2prx.com
 
@@ -827,7 +827,7 @@ async def main():
     """Main entry point."""
     import argparse
     
-    parser = argparse.ArgumentParser(
+    scraper = argparse.Argumentscraper(
         description="MediaMarkt Scraper - Pyppeteer Edition",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
@@ -839,41 +839,41 @@ Examples:
   python mediamarkt_puppeteer.py --proxy-host proxy.2prx.com --proxy-port 8080 \\
     --proxy-user myuser --proxy-pass mypass --captcha-key YOUR_2CAPTCHA_KEY
 
-More info: https://github.com/2parser/mediamarkt-parser
+More info: https://github.com/2scraper/mediamarkt-scraper
         """
     )
     
     # Output options
-    parser.add_argument('--format', choices=['json', 'csv'], default='json')
-    parser.add_argument('--output-dir', default='./output')
-    parser.add_argument('--details', action='store_true')
+    scraper.add_argument('--format', choices=['json', 'csv'], default='json')
+    scraper.add_argument('--output-dir', default='./output')
+    scraper.add_argument('--details', action='store_true')
     
     # Category options
-    parser.add_argument('--categories', type=str, default='')
-    parser.add_argument('--max-pages', type=int, default=0)
+    scraper.add_argument('--categories', type=str, default='')
+    scraper.add_argument('--max-pages', type=int, default=0)
     
     # Proxy options (2prx.com)
-    parser.add_argument('--proxy-host', default=os.getenv('PROXY_HOST', ''))
-    parser.add_argument('--proxy-port', type=int, default=int(os.getenv('PROXY_PORT', '0')))
-    parser.add_argument('--proxy-user', default=os.getenv('PROXY_USER', ''))
-    parser.add_argument('--proxy-pass', default=os.getenv('PROXY_PASS', ''))
+    scraper.add_argument('--proxy-host', default=os.getenv('PROXY_HOST', ''))
+    scraper.add_argument('--proxy-port', type=int, default=int(os.getenv('PROXY_PORT', '0')))
+    scraper.add_argument('--proxy-user', default=os.getenv('PROXY_USER', ''))
+    scraper.add_argument('--proxy-pass', default=os.getenv('PROXY_PASS', ''))
     
     # Captcha options (2captcha.com)
-    parser.add_argument('--captcha-key', default=os.getenv('TWOCAPTCHA_API_KEY', ''))
+    scraper.add_argument('--captcha-key', default=os.getenv('TWOCAPTCHA_API_KEY', ''))
     
     # Browser options
-    parser.add_argument('--headless', action='store_true', default=True)
-    parser.add_argument('--no-headless', action='store_false', dest='headless')
-    parser.add_argument('--no-stealth', action='store_true')
-    parser.add_argument('--no-fingerprint', action='store_true')
-    parser.add_argument('--chrome-path', default='')
+    scraper.add_argument('--headless', action='store_true', default=True)
+    scraper.add_argument('--no-headless', action='store_false', dest='headless')
+    scraper.add_argument('--no-stealth', action='store_true')
+    scraper.add_argument('--no-fingerprint', action='store_true')
+    scraper.add_argument('--chrome-path', default='')
     
     # Timing options
-    parser.add_argument('--delay-min', type=float, default=1.0)
-    parser.add_argument('--delay-max', type=float, default=3.0)
-    parser.add_argument('--timeout', type=int, default=30000)
+    scraper.add_argument('--delay-min', type=float, default=1.0)
+    scraper.add_argument('--delay-max', type=float, default=3.0)
+    scraper.add_argument('--timeout', type=int, default=30000)
     
-    args = parser.parse_args()
+    args = scraper.parse_args()
     
     config = ScraperConfig(
         captcha_api_key=args.captcha_key,
