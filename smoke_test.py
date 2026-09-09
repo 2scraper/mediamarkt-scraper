@@ -160,11 +160,31 @@ FIX_HUB = """<!DOCTYPE html>
 <html lang="de"><head><link href="https://www.mediamarkt.de/de/category/notebooks-680.html" rel="canonical"/></head><body><img src="https://assets.mmsrg.com/isr/x"/><h1>Notebooks</h1><nav>Unterkategorien</nav></body></html>"""
 
 
+# The Polish site, which earns its place three times over: it is a SECOND
+# live-verified locale, it quotes PLN rather than EUR, and it is one of the
+# two hosts in this group that answer WITHOUT a "www." prefix — the case
+# that silently broke the tile join (see _absolute_url in product_parser).
+#
+# NOT VERBATIM, and this is the only fixture here that is not: a real
+# product title from the same page ("ELECTROLUX LVM8E08Z 44l Czarny") has
+# been moved OUTSIDE the grid, so that the decoy it forms — "8Z 44", which
+# reads as "8 of 44" in Polish — sits on the page alongside the genuine
+# "2 z 85" counter. That is exactly the arrangement that made a live run
+# report a catalogue of 44 against a real 85, and it is what
+# test_totals_and_hub checks. Everything else is the site's own markup.
+FIX_LISTING_PL = """<!DOCTYPE html>
+<html lang="pl"><head><link data-rh="true" href="https://mediamarkt.pl/pl/category/kuchenki-mikrofalowe-z-grillem-do-zabudowy-70164.html" rel="canonical"/><link data-rh="true" href="https://mediamarkt.pl/pl/category/kuchenki-mikrofalowe-z-grillem-do-zabudowy-70164.html?page=2" rel="next"/><script type="application/ld+json">{"@context": "https://schema.org", "@type": "ItemList", "itemListElement": [{"@type": "ListItem", "position": 1, "item": {"@type": "Product", "name": "Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMN14BB Crisp 750W 22l Czarny", "image": "https://assets.mmsrg.com/isr/166325/c1/-/ASSET_MMS_162528972", "offers": {"@type": "Offer", "price": 1349, "priceCurrency": "PLN"}, "aggregateRating": {"@type": "AggregateRating", "ratingValue": 5, "reviewCount": 1}, "url": "https://mediamarkt.pl/pl/product/_kuchenka-mikrofalowa-z-grillem-do-zabudowy-whirlpool-wmn14bb-czarny-1493943.html"}}, {"@type": "ListItem", "position": 2, "item": {"@type": "Product", "name": "Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMD44ME Crisp 1000W 31l Beżowy", "image": "https://assets.mmsrg.com/isr/166325/c1/-/ASSET_MMS_162527414", "offers": {"@type": "Offer", "price": 1999, "priceCurrency": "PLN"}, "aggregateRating": {"@type": "AggregateRating", "ratingValue": 5, "reviewCount": 52}, "url": "https://mediamarkt.pl/pl/product/_kuchenka-mikrofalowa-z-grillem-do-zabudowy-whirlpool-wmd44me-szampanski-1493940.html"}}]}</script></head><body><img src="https://assets.mmsrg.com/isr/x"/><span class="title-decoy">ELECTROLUX LVM8E08Z 44l Czarny</span><div class="grid"><article class="frLpWO" data-test="mms-product-card"><div><div class="kMDfTj"><div class="fwydWh WYVMk"><div class="iJwEaV"><div class="dSKXLe"><div class="jgKSdo"><ul class="fmJWhh"><li class="gcaLPe"><div class="llIEvK" data-test="mms-badge"><span class="kiZnjo" data-cs-mask="true" title="Deszcz kuponów">Deszcz kuponów</span></div></li><li class="gcaLPe"><div class="llIEvK" data-test="mms-badge"><span class="kiZnjo" data-cs-mask="true" title="5 produkt za 1zł!">5 produkt za 1zł!</span></div></li></ul></div></div></div></div><div class="cdOdXP"><a aria-label="Czarny piekarnik mikrofalowy. Wyświetlacz cyfrowy pokazuje 12:00. W środku piecze się pizza. Widoczne logo Whirlpool." class="cevLqa hZAwcG" data-test="mms-router-link-product-image-wrapper" href="/pl/product/_kuchenka-mikrofalowa-z-grillem-do-zabudowy-whirlpool-wmn14bb-czarny-1493943.html" target="_self"><div><picture aria-hidden="true" data-test="product-image"><img alt="" crossorigin="anonymous" decoding="async" fetchpriority="auto" loading="lazy" src="https://assets.mmsrg.com/isr/166325/c1/-/ASSET_MMS_162528972?x=416&amp;y=416&amp;format=webp&amp;quality=60&amp;sp=yes&amp;strip=yes&amp;trim=yes&amp;ex=416&amp;ey=416&amp;align=center&amp;resizesource&amp;unsharp=0.5x0.5"/></picture></div></a></div><div class="iSysHa"></div><div class="fnobFr"><a data-test="mms-router-link-product-list-item-link" href="/pl/product/_kuchenka-mikrofalowa-z-grillem-do-zabudowy-whirlpool-wmn14bb-czarny-1493943.html" target="_self"><div class="hDcNlA" title="Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMN14BB Crisp 750W 22l Czarny"><h3 class="dhStGl" data-test="product-title">Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMN14BB Crisp 750W 22l Czarny</h3></div></a></div><div class="ecVWKw"><div><div><div class="TLeXV"><div data-test="mms-customer-rating-container" id=":Rb6i9irdakbqorajct:"><div aria-label="Średnia ocena produktu: 5 z 5 gwiazdek" data-test="mms-customer-rating" role="img"><div><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span></div></div><div><span data-test="mms-customer-rating-count">1</span><span id="rating-description-screen-reader-:Rb6i9irdakbqorajct:">Na podstawie 1 ocen</span><button aria-disabled="false" aria-expanded="false" aria-haspopup="dialog" aria-label="Pokaż więcej informacji o ocenach produktów" class="iDqtxR kBLyCw" data-ignore-a11y="true" data-state="closed" translate="no" type="button"><span aria-hidden="true" class="kGOPsL" color="#000000" height="16" width="16"></span></button></div></div></div></div></div></div><div class="kZeFLJ"><div><div class="kKHmyB"><dl class="gXjDqa"><dt><div class="cHFbNd"><p class="cGnhfJ">Typ produktu</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">Kuchenka mikrofalowa z grillem do zabudowy</p></div><div></div></dd><dt><div class="cHFbNd"><p class="cGnhfJ">Wymiary (szer./wys./głęb.) / Waga</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">59.5 cm x 38.2 cm x 32 cm / 19 kg</p></div><div></div></dd><dt><div class="cHFbNd"><p class="cGnhfJ">Moc maksymalna</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">2000 W</p></div><div></div></dd><dt><div class="cHFbNd"><p class="cGnhfJ">Objętość komory gotowania</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">22 l</p></div></dd></dl></div></div></div><div class="dtollO"><span></span><div class="ldLxww" data-test="cofr-price product-price"><div data-test="mms-price"><div><div class="gYTtGb"><div class="ioFSPw"><span>-15%</span></div></div><span class="htkAlu" direction="horizontal"></span><div class="kGZxQX notranslate" data-test="mms-strike-price-type-lop"><span class="fzObRQ" data-test="mms-strike-price-label">Najniższa cena:</span> <span aria-hidden="true" class="jCGxOY">1599,– zł</span><span>1599,00zł</span></div><button aria-disabled="false" aria-expanded="false" aria-haspopup="dialog" aria-label="Najniższa cena z 30 dni przed obniżką" class="iDqtxR kBLyCw lmKGlx" data-ignore-a11y="true" data-state="closed" translate="no" type="button"><span aria-hidden="true" class="opCjq" color="#000000" height="[object Object]" width="[object Object]"></span></button></div><div class="notranslate"><span aria-hidden="true" class="clIvFR hKPIXT">1349,– zł</span><span>1349,00zł</span></div><div><div><div data-test="additional-info-normal-wrapper"><p class="jrMsjP" data-test="additional-info-normal"><button data-href="#cofr-price-legal-info" type="button"><span>zawiera podatek VAT, darmowa dostawa</span></button></p><span class="kNYyGq" data-test="additional-info-spacer"></span></div><span class="bmwavm"></span><div data-test="additional-info-normal-wrapper"><p class="jrMsjP" data-test="additional-info-normal"><strong>Rozłóż na raty.</strong> Płać już od 39,13 zł miesięcznie (więcej w opisie produktu)</p></div></div></div></div></div></div><div class="fgbltE"></div><div class="fgbltE"><div role="separator"></div><div><span></span><div class="hGuOAH" data-test="product-delivery"><div data-test="mms-cofr-delivery_AVAILABLE"><div><div></div></div><div><div><span>Dostępny online</span></div><div><span>Złóż zamówienie dzisiaj, a dostarczymy je w dniach 11.09.2026 - 14.09.2026 </span></div></div></div></div></div><div></div><div class="dUCMnj" data-test="product-pickup"><div data-test="mms-cofr-pickup_NO_STORE_SELECTED"><div><div></div></div><div><div><span>Sprawdź odbiór w sklepie</span></div><span>Aby sprawdzić dostępność produktu:<span></span><button type="button">Wybierz swój sklep</button></span></div></div></div></div><div class="gtIozx"><div><div class="kIskS" grid="list" states="[object Object]"><div></div><div class="gGKIeL" state="default"><div><label class="bAsRJV" data-test="mms-product-comparison-add-to" for="srp-entry-point-a2c-1493943"><input aria-invalid="false" class="dvJfQE" id="srp-entry-point-a2c-1493943" name="srp-entry-point-a2c-1493943" type="checkbox" value=""/><div aria-hidden="true" class="jWuxKD bixLNe" color="#ffffff" data-test="icon-test-id"></div><span class="htkAlu" direction="horizontal"></span><p class="cGAFnE">Dodaj do porównania</p></label></div></div></div></div></div><div class="kyuCgq" grid="list" states="[object Object]"><div></div><button aria-disabled="false" aria-label="Dodaj do listy zakupów Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMN14BB Crisp 750W 22l Czarny" class="gqJlND" data-ignore-a11y="true" data-test="mms-search-wishlist-unselected" translate="no" type="button"><div aria-hidden="true" class="kAwIrP" height="24" width="24"></div></button></div><div><button aria-disabled="false" aria-label="Dodaj do koszyka Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMN14BB Crisp 750W 22l Czarny" class="hZMdkC" data-ignore-a11y="true" data-sctrack="add-to-basket-btn" data-test="cofr-add-to-basket-button a2c-Button" id="1493943" translate="no" type="button"><span aria-hidden="true"></span><span>Dodaj do koszyka</span></button></div><div><button aria-disabled="false" aria-label="Dodaj do koszyka Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMN14BB Crisp 750W 22l Czarny" class="hZMdkC" data-ignore-a11y="true" data-sctrack="add-to-basket-btn" data-test="cofr-add-to-basket-button a2c-Button" id="1493943" translate="no" type="button"><span aria-hidden="true"></span><span>Dodaj do koszyka</span></button></div></div></div></article><article class="frLpWO" data-test="mms-product-card"><div><div class="kMDfTj"><div class="fwydWh WYVMk"><div class="iJwEaV"><div class="dSKXLe"><div class="jgKSdo"><ul class="fmJWhh"><li class="gcaLPe"><div class="llIEvK" data-test="mms-badge"><span class="kiZnjo" data-cs-mask="true" title="Deszcz kuponów">Deszcz kuponów</span></div></li><li class="gcaLPe"><div class="llIEvK" data-test="mms-badge"><span class="kiZnjo" data-cs-mask="true" title="5 produkt za 1zł!">5 produkt za 1zł!</span></div></li></ul></div></div></div></div><div class="cdOdXP"><a aria-label="Piekarnik Whirlpool z pizzą w środku. Ma cyfrowy wyświetlacz i przyciski. Piekarnik jest w kolorze jasnobeżowym." class="cevLqa hZAwcG" data-test="mms-router-link-product-image-wrapper" href="/pl/product/_kuchenka-mikrofalowa-z-grillem-do-zabudowy-whirlpool-wmd44me-szampanski-1493940.html" target="_self"><div><picture aria-hidden="true" data-test="product-image"><img alt="" crossorigin="anonymous" decoding="sync" fetchpriority="high" loading="eager" src="https://assets.mmsrg.com/isr/166325/c1/-/ASSET_MMS_162527414?x=416&amp;y=416&amp;format=webp&amp;quality=60&amp;sp=yes&amp;strip=yes&amp;trim=yes&amp;ex=416&amp;ey=416&amp;align=center&amp;resizesource&amp;unsharp=0.5x0.5"/></picture><div class="iSGQIq"><picture><img alt="Biały dzwonek z falami na niebieskim tle, wskazujący alert." crossorigin="anonymous" decoding="async" fetchpriority="auto" loading="eager" src="https://assets.mmsrg.com/isr/166325/c1/-/ASSET_MMS_171868814/isr//c1/-/fee_194_131_png?y=80&amp;format=webp&amp;quality=60&amp;sp=yes&amp;strip=yes&amp;trim=true"/></picture></div></div></a></div><div class="iSysHa"></div><div class="fnobFr"><a data-test="mms-router-link-product-list-item-link" href="/pl/product/_kuchenka-mikrofalowa-z-grillem-do-zabudowy-whirlpool-wmd44me-szampanski-1493940.html" target="_self"><div class="hDcNlA" title="Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMD44ME Crisp 1000W 31l Beżowy"><h3 class="dhStGl" data-test="product-title">Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMD44ME Crisp 1000W 31l Beżowy</h3></div></a></div><div class="ecVWKw"><div><div><div class="TLeXV"><div data-test="mms-customer-rating-container" id=":R2pi1irdakbqorajct:"><div aria-label="Średnia ocena produktu: 5 z 5 gwiazdek" data-test="mms-customer-rating" role="img"><div><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span><span aria-hidden="true" data-test="mms-fully-rated-star"></span></div></div><div><span data-test="mms-customer-rating-count">52</span><span id="rating-description-screen-reader-:R2pi1irdakbqorajct:">Na podstawie 52 ocen</span><button aria-disabled="false" aria-expanded="false" aria-haspopup="dialog" aria-label="Pokaż więcej informacji o ocenach produktów" class="iDqtxR kBLyCw" data-ignore-a11y="true" data-state="closed" translate="no" type="button"><span aria-hidden="true" class="kGOPsL" color="#000000" height="16" width="16"></span></button></div></div></div></div></div></div><div class="kZeFLJ"><div><div class="kKHmyB"><dl class="gXjDqa"><dt><div class="cHFbNd"><p class="cGnhfJ">Typ produktu</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">Kuchenka mikrofalowa z grillem do zabudowy</p></div><div></div></dd><dt><div class="cHFbNd"><p class="cGnhfJ">Wymiary (szer./wys./głęb.) / Waga</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">59.5 cm x 38.5 cm x 46.8 cm / 27 kg</p></div><div></div></dd><dt><div class="cHFbNd"><p class="cGnhfJ">Moc maksymalna</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">2100 W</p></div><div></div></dd><dt><div class="cHFbNd"><p class="cGnhfJ">Objętość komory gotowania</p></div></dt><dd><div class="cHFbNd"><p class="poAGC">31 l</p></div></dd></dl></div></div></div><div class="dtollO"><span></span><div class="ldLxww" data-test="cofr-price product-price"><div data-test="mms-price"><div></div><div class="notranslate"><span aria-hidden="true" class="kipMlP hKPIXT">1999,– zł</span><span>1999,00zł</span></div><div><div><div data-test="additional-info-normal-wrapper"><p class="jrMsjP" data-test="additional-info-normal"><button data-href="#cofr-price-legal-info" type="button"><span>zawiera podatek VAT, darmowa dostawa</span></button></p><span class="kNYyGq" data-test="additional-info-spacer"></span></div><span class="bmwavm"></span><div data-test="additional-info-normal-wrapper"><p class="jrMsjP" data-test="additional-info-normal"><strong>Rozłóż na raty.</strong> Płać już od 57,98 zł miesięcznie (więcej w opisie produktu)</p></div></div></div></div></div></div><div class="fgbltE"></div><div class="fgbltE"><div role="separator"></div><div><span></span><div class="hGuOAH" data-test="product-delivery"><div data-test="mms-cofr-delivery_AVAILABLE"><div><div></div></div><div><div><span>Dostępny online</span></div><div><span>Złóż zamówienie przed 20:00, a dostarczymy je już jutro</span></div></div></div></div></div><div></div><div class="dUCMnj" data-test="product-pickup"><div data-test="mms-cofr-pickup_NO_STORE_SELECTED"><div><div></div></div><div><div><span>Sprawdź odbiór w sklepie</span></div><span>Aby sprawdzić dostępność produktu:<span></span><button type="button">Wybierz swój sklep</button></span></div></div></div></div><div class="gtIozx"><div><div class="kIskS" grid="list" states="[object Object]"><div></div><div class="gGKIeL" state="default"><div><label class="bAsRJV" data-test="mms-product-comparison-add-to" for="srp-entry-point-a2c-1493940"><input aria-invalid="false" class="dvJfQE" id="srp-entry-point-a2c-1493940" name="srp-entry-point-a2c-1493940" type="checkbox" value=""/><div aria-hidden="true" class="jWuxKD bixLNe" color="#ffffff" data-test="icon-test-id"></div><span class="htkAlu" direction="horizontal"></span><p class="cGAFnE">Dodaj do porównania</p></label></div></div></div></div></div><div class="kyuCgq" grid="list" states="[object Object]"><div></div><button aria-disabled="false" aria-label="Dodaj do listy zakupów Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMD44ME Crisp 1000W 31l Beżowy" class="gqJlND" data-ignore-a11y="true" data-test="mms-search-wishlist-unselected" translate="no" type="button"><div aria-hidden="true" class="kAwIrP" height="24" width="24"></div></button></div><div><button aria-disabled="false" aria-label="Dodaj do koszyka Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMD44ME Crisp 1000W 31l Beżowy" class="hZMdkC" data-ignore-a11y="true" data-sctrack="add-to-basket-btn" data-test="cofr-add-to-basket-button a2c-Button" id="1493940" translate="no" type="button"><span aria-hidden="true"></span><span>Dodaj do koszyka</span></button></div><div><button aria-disabled="false" aria-label="Dodaj do koszyka Kuchenka mikrofalowa z grillem do zabudowy WHIRLPOOL WMD44ME Crisp 1000W 31l Beżowy" class="hZMdkC" data-ignore-a11y="true" data-sctrack="add-to-basket-btn" data-test="cofr-add-to-basket-button a2c-Button" id="1493940" translate="no" type="button"><span aria-hidden="true"></span><span>Dodaj do koszyka</span></button></div></div></div></article></div><div class="count">2 z 85</div></body></html>"""
+
+
 # URLs the fixtures were taken from. Kept beside them because `parse_products`
 # reads the page number, the category label and the host out of the URL it is
 # given, so a fixture without its URL tests less than it looks like it does.
 URL_LISTING_DE = "https://www.mediamarkt.de/de/category/k%C3%BChlen-gefrieren-32.html"
 URL_LISTING_SEARCH = "https://www.mediamarkt.de/de/search.html?query=usb-c%20kabel%202m"
+# No "www." — the Polish and Luxembourg sites answer on the bare host, and
+# their own hreflang entries say so.
+URL_LISTING_PL = ("https://mediamarkt.pl/pl/category/"
+                  "kuchenki-mikrofalowe-z-grillem-do-zabudowy-70164.html")
 URL_DETAIL_RRP = ("https://www.mediamarkt.de/de/product/"
                   "_tomodachi-life-wo-traume-wahr-werden-nintendo-switch-3053694.html")
 URL_DETAIL_LOP = ("https://www.mediamarkt.de/de/product/"
@@ -394,6 +414,57 @@ def test_listing_values():
     return ok
 
 
+def test_second_locale():
+    group("a second country site: PLN, a non-www host, the same parser")
+    ok = True
+    rows = parse_products(FIX_LISTING_PL, URL_LISTING_PL)
+    ok &= check("the Polish fixture yields 2 rows", len(rows) == 2)
+    if len(rows) != 2:
+        return False
+
+    ok &= check("prices are quoted in PLN, read from the page not guessed",
+                all(r.currency == "PLN" for r in rows))
+    ok &= check("Polish skus and prices are pinned",
+                [(r.sku, r.price) for r in rows]
+                == [("1493943", 1349.0), ("1493940", 1999.0)])
+    ok &= check("source is the bare host, without an invented www.",
+                all(r.source == "mediamarkt.pl" for r in rows))
+
+    # THE REGRESSION THIS FIXTURE EXISTS FOR. `mediamarkt.pl` answers without
+    # a "www." prefix. A version of the parser rebuilt every product URL as
+    # "https://www.{host}{path}", which never matched the page's own
+    # "https://mediamarkt.pl/...", so the join between a structured row and
+    # its rendered tile failed on every row of the site.
+    #
+    # Nothing looked wrong: the rows, the titles and the prices all come from
+    # the structured data and were perfectly correct. What vanished was
+    # `original_price`, `lowest_price_30d` and any confirmation of the price
+    # — measured on a live Polish listing as 12 rows, 12 priced, 0 confirmed.
+    ok &= check("every Polish row is confirmed against its rendered tile",
+                all(r.price_source == "jsonld+dom" for r in rows))
+    ok &= check("...so the DOM-only columns are actually populated",
+                rows[0].lowest_price_30d == 1599.0)
+    ok &= check("the row URLs keep the host form the page itself uses",
+                all(r.url.startswith("https://mediamarkt.pl/") for r in rows))
+
+    # The match key has to survive a www./non-www difference on EITHER side,
+    # not just this one.
+    key = product_parser._match_key
+    ok &= check("the tile match key ignores a www. difference",
+                key("https://www.mediamarkt.pl/pl/product/_x-1.html")
+                == key("https://mediamarkt.pl/pl/product/_x-1.html"))
+    ok &= check("...and a percent-encoding difference",
+                key("https://www.mediamarkt.de/de/category/k%C3%BChlen-1.html")
+                == key("https://www.mediamarkt.de/de/category/kühlen-1.html"))
+    ok &= check("...and a trailing tracking parameter",
+                key("https://mediamarkt.pl/pl/product/_x-1.html?utm_source=a")
+                == key("https://mediamarkt.pl/pl/product/_x-1.html"))
+    ok &= check("but it does NOT merge two different products",
+                key("https://mediamarkt.pl/pl/product/_x-1.html")
+                != key("https://mediamarkt.pl/pl/product/_x-2.html"))
+    return ok
+
+
 def test_unrated_products():
     group("an unrated product has no rating (not a rating of zero)")
     ok = True
@@ -436,6 +507,21 @@ def test_totals_and_hub():
     # pair of numbers that happened to sit around the same word.
     ok &= check("a reversed pair is not mistaken for a count",
                 total_results(page("<div>2311 von 12</div>")) is None)
+
+    # The Polish connector is a bare "z", which occurs inside model numbers.
+    # The FIX_LISTING_PL fixture carries a real product title from the same
+    # page — "ELECTROLUX LVM8E08Z 44l" — whose "8Z 44" reads as "8 of 44",
+    # alongside the genuine "2 z 85" counter. A loose search found the title
+    # first and reported a catalogue of 44 against a real 85. The counter is
+    # its own element, so only a text node that IS the count is accepted.
+    ok &= check("a count-shaped substring inside a product title is ignored",
+                total_results(FIX_LISTING_PL) == 85)
+    ok &= check("...and passing the parsed row count confirms it rather than "
+                "guessing", total_results(FIX_LISTING_PL, shown=2) == 85)
+    # Passing a count the page does not print means the line was not found,
+    # which is a None rather than a number nobody checked.
+    ok &= check("a mismatched shown count yields None, not a wrong total",
+                total_results(FIX_LISTING_PL, shown=99) is None)
 
     # A hub category is a REAL page that has no products on it. It must read
     # as empty (exit 4), not as blocked (exit 3) — otherwise a user goes
@@ -1451,6 +1537,7 @@ def main() -> int:
     ok &= test_price_parsing()
     ok &= test_strike_prices()
     ok &= test_listing_values()
+    ok &= test_second_locale()
     ok &= test_unrated_products()
     ok &= test_totals_and_hub()
     ok &= test_product_detail()

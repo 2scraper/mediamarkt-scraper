@@ -109,6 +109,24 @@ run surfaced it.
 - **A Playwright connection error printed the endpoint password** five times
   over, in the message and its call log. Credentials are now masked
   everywhere they can appear, with the host and port kept.
+- **Two country sites silently lost their DOM-only columns.** `mediamarkt.pl`
+  and `mediamarkt.lu` answer without a `www.` prefix — their own hreflang
+  entries say so — while the parser rebuilt every product URL as
+  `https://www.{host}{path}`. The reconstructed URL never matched the page's
+  own, so the join between a structured row and its rendered tile failed on
+  every row of those sites: `original_price` and `lowest_price_30d` empty,
+  `price_source` always `jsonld`, and nothing in the log to say why.
+  Measured on a live Polish listing before the fix: 12 rows, 12 priced, 0
+  confirmed. URLs are now resolved against the page's own address, and the
+  tile join is keyed on a form that ignores `www.`, percent-encoding and
+  trailing tracking parameters.
+- **A product title was read as the catalogue counter.** Polish writes "of"
+  as a bare `z`, and the title "ELECTROLUX LVM8E08Z 44l" contains "8Z 44" —
+  which a loose search read as "8 of 44", making a live listing report a
+  catalogue of 44 against its own printed 85. The counter is its own element,
+  so only a text node that IS the count is accepted, and the caller now
+  passes the number of rows it actually parsed so the read is checked rather
+  than scanned for.
 
 ### Removed
 

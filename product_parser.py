@@ -89,7 +89,8 @@ import json
 import logging
 import re
 from typing import Dict, List, Optional, Tuple
-from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode, unquote
+from urllib.parse import (urlparse, urlunparse, parse_qsl, urlencode, unquote,
+                          urljoin)
 
 from bs4 import BeautifulSoup
 
@@ -560,17 +561,47 @@ def category_from_url(url: str) -> Optional[str]:
     return None
 
 
-def _canonical_product_url(host: str, href: str) -> str:
-    """An absolute product URL from a possibly-relative href."""
+def _absolute_url(base_url: str, href: str) -> str:
+    """An absolute product URL from a possibly-relative href.
+
+    Resolved against the PAGE's own URL rather than rebuilt from the bare
+    hostname, because the two are not interchangeable across this group.
+    Nine of the eleven country sites answer on `www.`; `mediamarkt.pl` and
+    `mediamarkt.lu` do not, and their own hreflang entries say so.
+
+    A version of this function prepended "www." unconditionally, and
+    everything still looked healthy — rows, titles, prices all come from the
+    structured data. What broke silently was the JOIN between a row and its
+    rendered tile: the reconstructed "https://www.mediamarkt.pl/..." never
+    matched the page's own "https://mediamarkt.pl/...", so on those two sites
+    every row came back `price_source: "jsonld"` with `original_price` and
+    `lowest_price_30d` empty, and nothing said why. Measured on a live Polish
+    listing: 12 rows, 12 priced, 0 confirmed.
+    """
     if not href:
         return ""
-    if href.startswith("http://") or href.startswith("https://"):
-        return href
-    if href.startswith("//"):
-        return "https:" + href
-    if not href.startswith("/"):
-        href = "/" + href
-    return "https://www.{}{}".format(host, href)
+    return urljoin(base_url, href)
+
+
+# The key two URLs are compared on when deciding whether a JSON-LD row and a
+# rendered tile describe the same product. Deliberately NOT the URL itself:
+# the two can differ in ways that do not change which product they address,
+# and every such difference silently empties the DOM-only columns.
+#
+#   * `www.` — see _absolute_url above.
+#   * percent-encoding — the same disagreement page_flow.comparable had to
+#     learn for pagination, on a platform whose product slugs are full of
+#     accented characters.
+#   * a trailing query — a tile's href can carry a tracking parameter the
+#     structured URL does not.
+def _match_key(url: str) -> str:
+    if not url:
+        return ""
+    parts = urlparse(url)
+    host = (parts.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host + unquote(parts.path)
 
 
 def sku_from_url(url: Optional[str]) -> Optional[str]:
@@ -688,30 +719,50 @@ def _discount_from(price: Optional[float], original_price: Optional[float]
 # output holding fewer rows than the pages it fetched lost something.
 #
 # Localised, so the connecting word varies; the two numbers around it do not.
+#
+# Matched against a WHOLE text node below rather than searched for inside
+# one, and that is not tidiness. Polish writes the connector as a bare "z",
+# and a real product title on a live listing — "ELECTROLUX LVM8E08Z 44l" —
+# contains "8Z 44", which read as "8 of 44" and made the page report a
+# catalogue of 44 while its own counter said 85. The count is rendered as its
+# own element, so requiring the node to BE the count removes that whole class
+# of false positive for nothing.
 _TOTAL_RE = re.compile(
     r"(\d[\d.,    ]*)\s*(?:von|of|de|di|van|z|közül)\s+"
     r"(\d[\d.,    ]*\d)", re.IGNORECASE)
 
 
-def total_results(html: str) -> Optional[int]:
+def total_results(html: str, shown: Optional[int] = None) -> Optional[int]:
     """The catalogue size the listing page reports, or None.
 
-    Read from the page's own "shown of total" line. Reported in the run
+    Read from the page's own "shown of total" line, and reported in the run
     metadata so a consumer can see what fraction of a category a run took.
+
+    Pass `shown` — how many products the caller actually parsed from this
+    page. It turns the read from a scan into a check, because the line the
+    page prints starts with exactly that number. Without it this falls back
+    to the first count-shaped node, which is correct on every page captured
+    but is not verified against anything.
     """
     if not html:
         return None
     soup = BeautifulSoup(html, "html.parser")
     for node in soup.find_all(string=_TOTAL_RE):
-        m = _TOTAL_RE.search(str(node))
+        text = " ".join(str(node).split())
+        m = _TOTAL_RE.fullmatch(text)
         if not m:
+            # The pattern appears INSIDE some longer text — a product title,
+            # a spec line, a script payload. Not the counter.
             continue
-        shown, total = _int_from(m.group(1)), _int_from(m.group(2))
+        found, total = _int_from(m.group(1)), _int_from(m.group(2))
         # The line reads "<shown> of <total>", so a first number larger than
         # the second is some other pair that happened to sit around the same
         # word — a date range, a warranty term.
-        if shown is not None and total is not None and 0 < shown <= total:
-            return total
+        if found is None or total is None or not 0 < found <= total:
+            continue
+        if shown is not None and found != shown:
+            continue
+        return total
     return None
 
 
@@ -1034,12 +1085,19 @@ def _detail_dom_price(soup, host_cur: Optional[str]
     return amount, currency or host_cur
 
 
-def _tile_by_url(soup, host: str) -> Dict[str, object]:
-    """Index the page's product cards by the absolute URL each one links to.
+def _tile_by_url(soup, base_url: str) -> Dict[str, object]:
+    """Index the page's product cards by what each one links to.
 
     The JSON-LD gives every product on the page; the tiles give the two
-    prices JSON-LD does not publish. Joining them on the product URL is what
-    makes `price_source == "jsonld+dom"` mean something.
+    prices JSON-LD does not publish. Joining them is what makes
+    `price_source == "jsonld+dom"` mean something — and what fills
+    `original_price` and `lowest_price_30d` at all.
+
+    Keyed on `_match_key` rather than on the raw URL, because when this join
+    fails it fails SILENTLY: the row count, the titles and the prices all
+    come from the structured data and stay perfectly healthy while the two
+    DOM-only columns quietly empty out. Read _match_key for the differences
+    that have actually caused that.
     """
     index: Dict[str, object] = {}
     for card in soup.select(SELECTORS["product_card"]):
@@ -1047,7 +1105,7 @@ def _tile_by_url(soup, host: str) -> Dict[str, object]:
         href = link.get("href") if link else None
         if not href:
             continue
-        index.setdefault(_canonical_product_url(host, href), card)
+        index.setdefault(_match_key(_absolute_url(base_url, href)), card)
     return index
 
 
@@ -1071,9 +1129,9 @@ def parse_products(html: str, base_url: str, category: Optional[str] = None
 
     nodes = _products_in_ld(_ld_blocks(soup))
     if not nodes:
-        return _parse_url_fallback(soup, host, label, page_no, host_cur)
+        return _parse_url_fallback(soup, base_url, label, page_no, host_cur)
 
-    tiles = _tile_by_url(soup, host)
+    tiles = _tile_by_url(soup, base_url)
     rows: List[Product] = []
     confirmed = 0
     for node in nodes:
@@ -1085,7 +1143,7 @@ def parse_products(html: str, base_url: str, category: Optional[str] = None
         url = _clean_text(node.get("url")) or _clean_text(offer.get("url"))
         if not url:
             continue
-        url = _canonical_product_url(host, url)
+        url = _absolute_url(base_url, url)
         rating, review_count = _ld_rating(node)
 
         row = Product(
@@ -1105,7 +1163,7 @@ def parse_products(html: str, base_url: str, category: Optional[str] = None
             position=len(rows) + 1,
         )
 
-        tile = tiles.get(url)
+        tile = tiles.get(_match_key(url))
         if tile is not None:
             _overlay_from_tile(row, tile, host_cur)
             confirmed += 1
@@ -1171,7 +1229,7 @@ def _overlay_from_tile(row: Product, tile, host_cur: Optional[str]) -> None:
             row.title = _clean_text(title_node.get_text(" ", strip=True))
 
 
-def _parse_url_fallback(soup, host: str, label: Optional[str],
+def _parse_url_fallback(soup, base_url: str, label: Optional[str],
                         page_no: Optional[int], host_cur: Optional[str]
                         ) -> List[Product]:
     """Rows built from product links alone, when no structured data was found.
@@ -1199,8 +1257,8 @@ def _parse_url_fallback(soup, host: str, label: Optional[str],
         title_node = tile.select_one(SELECTORS["title"])
         img = tile.select_one("img")
         row = Product(
-            source=host,
-            url=_canonical_product_url(host, href),
+            source=site_host(base_url) or SOURCE_DEFAULT,
+            url=_absolute_url(base_url, href),
             sku=sku,
             title=_clean_text(title_node.get_text(" ", strip=True)) if title_node
             else _clean_text(anchor.get_text(" ", strip=True)),
@@ -1249,7 +1307,7 @@ def parse_product_detail(html: str, base_url: str, category: Optional[str] = Non
     offer = _ld_offer(node)
 
     url = _clean_text(node.get("url")) or _clean_text(offer.get("url")) or base_url
-    url = _canonical_product_url(host, url)
+    url = _absolute_url(base_url, url)
     # The URL's article number and the structured `sku` agree on every
     # captured page. The structured one is preferred because it is the site
     # stating a fact rather than this parser reading a slug; the URL is the
