@@ -4,7 +4,7 @@ mediamarkt-scraper — Playwright edition (primary engine)
 ========================================================
 
 Scrapes MediaMarkt category grids, search results and product detail pages,
-from any of the group's eleven country sites. Which site is decided by the
+from any of the group's ten country sites. Which site is decided by the
 URL you pass — there is no --country flag, so a flag and a URL cannot
 disagree about which shop a run is reading.
 
@@ -70,7 +70,7 @@ from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
 from product_parser import (parse_products, parse_product_detail,
                             SELECTORS, detect_bot_challenge, page_url,
                             listing_kind, site_host, is_supported_host,
-                            total_results, HOSTS)
+                            total_results, HOSTS, unsupported_reason)
 from output_writer import dedupe_by_key, finish_run
 import page_flow
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
@@ -1123,7 +1123,7 @@ def parse_args():
                    help="MediaMarkt URL. A category grid (/de/category/...), "
                         "search results (/de/search.html?query=...) or a "
                         "product page (/de/product/...) depending on --mode. "
-                        "Any of the eleven country sites — the hostname decides "
+                        "Any of the ten country sites — the hostname decides "
                         "which. Required, unless MEDIAMARKT_URL is set in the "
                         "environment or in .env.")
     p.add_argument("--mode", choices=["listing", "product"],
@@ -1247,6 +1247,10 @@ def parse_args():
         # pattern and its pagination convention are all MediaMarkt's, so
         # pointing this at another shop would not fail loudly — it would
         # return zero rows and look like an empty category.
+        why = unsupported_reason(args.url)
+        if why:
+            p.error(f"{site_host(args.url)} {why}. Supported hosts: "
+                    f"{', '.join(sorted(HOSTS))}.")
         p.error(f"{site_host(args.url) or args.url!r} is not a MediaMarkt "
                 f"site. Supported hosts: {', '.join(sorted(HOSTS))}.")
     if args.mode != "listing" and args.pages != 1:

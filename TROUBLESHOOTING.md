@@ -41,14 +41,14 @@ the same request returns the full page. So:
 `--cdp-endpoint` pointing at a Scraping Browser session with the right
 `country-` in it.
 
-**And "residential" is necessary, not always sufficient.** Which exits a site
-accepts is not uniform across the group. One German residential address on
-2026-09-09 was accepted by `mediamarkt.de`, `mediamarkt.es` and
-`mediamarkt.pl`, and refused with 403 by `mediamarkt.at`, `mediamarkt.nl`,
-`mediamarkt.be`, `mediamarkt.ch`, `mediamarkt.lu`, `mediaworld.it`,
-`mediamarkt.com.tr` and `mediamarkt.hu`. If a site refuses you from a good
-residential address, try one in that site's own country before concluding
-anything about the code.
+**And "residential" is necessary, not sufficient — the country has to
+match.** Measured on 2026-09-09: one German residential address was accepted
+by `mediamarkt.de`, `mediamarkt.es` and `mediamarkt.pl` and refused with 403
+by the other seven sites, each of which then answered normally from an exit
+in its OWN country. So if a site refuses you from a perfectly good
+residential address, change the country before suspecting the code. With a
+2Captcha proxy that is one word (`-region-de` to `-region-it`); with the
+Scraping Browser API it is the `country-` segment.
 
 ---
 
@@ -222,7 +222,7 @@ per engine.
 
 ## Something else
 
-`python3 smoke_test.py` runs 269 checks with no network, no browser and no
+`python3 smoke_test.py` runs 284 checks with no network, no browser and no
 credentials. If it passes and a live run still misbehaves, the problem is in
 the fetch rather than the parse — which narrows it to the exit address, the
 engine, or the URL. If it fails, the message names the check.

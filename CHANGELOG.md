@@ -11,6 +11,56 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.2] — 2026-09-09
+
+All ten supported country sites are now live-verified, each from a
+residential exit in its own country. Doing that turned up one more silent
+parsing bug and one site that does not belong in the list at all.
+
+### Fixed
+
+- **A discount badge was read as a price on the Turkish site.** Turkish puts
+  the percent sign BEFORE its number and the currency symbol before its own —
+  `-%10,34 ₺25.999,–` — so the pattern's trailing-symbol form matched
+  "10,34 ₺": the badge's number wearing the next price's symbol. A 25,999 TRY
+  air conditioner parsed as costing 10.34. It reached the output only as an
+  unconfirmed row, because the structured price disagreed with the tile and
+  the parser kept the structured one — the guard worked, the parse did not.
+  Percentages are now stripped BEFORE matching, in both word orders (German
+  writes `-16%`, Turkish `-%10,34`), because merely rejecting the match still
+  consumed the currency symbol and lost the real price with it.
+
+### Changed
+
+- **`mediamarkt.lu` is no longer a supported host.** It is in MediaMarkt's
+  own hreflang set and it is a real MediaMarkt shop, but it does not run on
+  this platform: fetched from a Luxembourg exit it answers 200 with a full
+  French storefront containing zero `/category/` paths, zero `/product/`
+  paths, zero product cards, and JSON-LD carrying only `Organization` and
+  `WebSite`. It is a Shopify store. Every selector here would find nothing,
+  so a run would have reported an empty category rather than an unsupported
+  site.
+- **A refused host now says WHY** when the answer is more than "not ours".
+  `mediamarkt.lu` and the Saturn brands each get their own reason instead of
+  "is not a MediaMarkt site", which was false for all three and sent the
+  reader looking for a typo.
+- **The exit country has to match the site.** Measured rather than assumed
+  this time: one German residential address was accepted by `.de`, `.es` and
+  `.pl` and refused with 403 by the other seven — each of which then answered
+  normally from an exit in its own country. v0.1.1 stated this as an
+  assumption; it is now a result, and the README and TROUBLESHOOTING say so.
+- `smoke_test.py`: 284 checks, up from 269. The new Turkish fixture carries a
+  prefixed currency, a percent sign before its number and an instalment line
+  in one price block.
+
+### Verified
+
+Ten of ten sites, 2026-09-09, each from a local residential exit: twelve
+products a page with every row confirmed against its rendered tile, in EUR
+(de, at, nl, be, es, it), CHF (ch), PLN (pl), HUF (hu) and TRY (tr).
+
+---
+
 ## [0.1.1] — 2026-09-09
 
 Two silent bugs, both found by live-verifying a SECOND country site rather
@@ -186,5 +236,6 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.2]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.0
