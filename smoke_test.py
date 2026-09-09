@@ -1378,9 +1378,54 @@ def test_proxy_pool():
     ok &= check("an empty pool is refused rather than silently accepted",
                 _raises(lambda: ProxyPool([])))
 
-    line = "http://eu.proxy.2captcha.com:2334:login:pass"
-    ok &= check("a host:port:user:pass line is understood",
-                parse_proxy_line(line) is not None)
+    # This used to assert that "http://host:port:login:pass" — a line from a
+    # proxy LIST FILE — "is understood", checking only that parse_proxy_line
+    # did not reject it. It returned the string unchanged, so the check
+    # passed; the value was never usable, and it blew up several calls later.
+    # A test that asserts a function did not complain is not a test that its
+    # answer was right.
+    #
+    # A proxy LIST FILE line pasted where a proxy URL belongs. This is the
+    # mistake a new user makes — the file format is
+    # scheme://host:port:login:password and the flag wants
+    # http://login:password@host:port — and it reached a real CI run.
+    #
+    # It used to sail through parse_proxy_line (which never looked at the
+    # port) and blow up much later inside to_playwright as an uncaught
+    # ValueError: exit 1, a crash, where it should be exit 2, bad usage. And
+    # the traceback printed the login AND the password into a public CI log.
+    from proxy_pool import ProxyError
+    pasted = ("http://eu.proxy.2captcha.com:2334:"
+              "SOMELOGIN-zone-custom-region-de:SOMEPASSWORD")
+    raised = None
+    try:
+        parse_proxy_line(pasted, source="MEDIAMARKT_PROXY")
+    except ProxyError as exc:
+        raised = str(exc)
+    ok &= check("a proxy-list line pasted as a URL is refused, not crashed on",
+                raised is not None)
+    ok &= check("...and the refusal says what the value should look like",
+                raised is not None and "login:password@host:port" in raised)
+    ok &= check("...and neither the login nor the password is in the message",
+                raised is not None
+                and "SOMEPASSWORD" not in raised and "SOMELOGIN" not in raised)
+
+    # mask() is the last thing standing between a password and a log, and it
+    # is called precisely when the value is already wrong. It read
+    # `parsed.port`, which urlparse computes lazily and which RAISES on a
+    # malformed authority — so the masker blew up on exactly the input that
+    # most needed masking. A masker that raises is worse than a vague one.
+    ok &= check("mask() does not raise on a malformed URL",
+                "SOMEPASSWORD" not in mask(pasted))
+    for junk in ("::::", "not a url", "http://", "://x", ""):
+        try:
+            mask(junk)
+            raised_here = False
+        except Exception:
+            raised_here = True
+        ok &= check("mask(%r) does not raise" % junk, not raised_here)
+    ok &= check("mask() still keeps host and port on a good URL",
+                mask("http://u:p@h.example:8080") == "http://***:***@h.example:8080")
     return ok
 
 
