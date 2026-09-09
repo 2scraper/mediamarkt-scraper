@@ -11,6 +11,55 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.3] — 2026-09-09
+
+Three defects found by running the things nothing had run yet: the second
+engine against a live page, and the Docker image's file list against the
+entrypoint's imports. All three were invisible to a green CI.
+
+### Fixed
+
+- **The pyppeteer engine died with `NameError` on its first real page.**
+  `detect_page_state` was called on a line reached only while fetching, after
+  the import of that name had been removed in favour of `page_flow.classify`.
+  The module imported cleanly, `--help` worked, `compileall` passed, the
+  whole offline suite passed and CI was green — byte-compiling proves a file
+  parses, not that its names resolve, and the paths where they do not are
+  exactly the ones an offline suite never executes. `smoke_test.py` now walks
+  every module's AST for names that are never imported, defined or assigned.
+- **The Docker image was broken on every invocation, `--help` included.** The
+  Dockerfile COPYs an explicit list of modules — right, so the image does not
+  carry the test suite or a stray `.env` — and the list had fallen behind:
+  `proxy_pool.py` was missing while `playwright_scraper.py` imports it at
+  module level. Nothing in the repo would have noticed, because CI never
+  builds the image. `smoke_test.py` now checks the COPY list against the
+  entrypoint's transitive imports, which needs no Docker to run.
+- A stale `--out /out/headphones` example in the Dockerfile's header,
+  inherited from a sibling repo.
+
+### Verified
+
+- **pyppeteer live**, over the Scraping Browser: 24 rows across 2 pages, 24
+  of 24 confirmed against a rendered tile, and the same 24 skus the
+  Playwright engine returned for the same category. The one price that
+  differed between the two runs had genuinely changed on the site in the
+  eighty minutes between them (119.99 -> 125.00, confirmed by re-fetching the
+  product), so the engines agree.
+- **Selenium's two documented refusals**: a credentialled `--cdp-endpoint`
+  exits 2 with the credential masked, and a `user:pass` proxy is stripped
+  without the password reaching the output.
+- **The canary workflow, dispatched manually for the first time.** With no
+  `MEDIAMARKT_PROXY` secret it takes the skip path and completes green in 12
+  seconds with a notice explaining why — which is what it was designed to do
+  and had never been observed doing.
+- **The canary's own assertion block**, extracted from the workflow and run
+  against a real 36-row output: passes.
+- `pytest` locally, as well as through CI.
+
+`smoke_test.py`: 301 checks, up from 284.
+
+---
+
 ## [0.1.2] — 2026-09-09
 
 All ten supported country sites are now live-verified, each from a
@@ -236,6 +285,7 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.3]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.3
 [0.1.2]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.0
