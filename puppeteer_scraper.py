@@ -565,7 +565,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     if args.mode == "listing" and page_num == 1:
         # MediaMarkt prints its own catalogue size ("12 von 42930"), which
         # turns "did we get everything?" into arithmetic instead of a guess.
-        outcome.total_available = total_results(html)
+        outcome.total_available = total_results(html, shown=len(products))
 
     if products and args.mode == "listing":
         priced = sum(1 for p in products if p.price is not None)

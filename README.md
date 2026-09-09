@@ -155,13 +155,28 @@ article-number pattern and the pagination convention are all MediaMarkt's,
 and pointing them at another shop would not fail loudly, it would return zero
 rows and read as an empty category.
 
-**Only `mediamarkt.de` has been live-verified.** The others share the
-platform and the markup, and the parser reads each page's own
-`priceCurrency` rather than inferring it, so they are expected to work — but
-"expected" is not "measured", and this README does not promise what was not
-run. Saturn (saturn.de, saturn.at) is a sibling brand on similar markup that
-is deliberately **not** in the list, because it is not in MediaMarkt's
-hreflang set and has not been checked.
+**Three sites are live-verified: `.de`, `.es` and `.pl`.** All three
+returned 12 products a page with 100% of rows confirmed against a rendered
+tile, in EUR, EUR and PLN respectively — so the parser handles a second
+language and a non-euro currency without a special case. The remaining eight
+share the platform and the markup and are expected to work, but "expected" is
+not "measured" and this README does not promise what was not run.
+
+**Which exits a site accepts is not uniform, and this is the practical
+catch.** From one German residential address on 2026-09-09:
+
+| Accepted (HTTP 200) | Refused (HTTP 403) |
+|---|---|
+| mediamarkt.de, mediamarkt.es, mediamarkt.pl | mediamarkt.at, mediamarkt.nl, mediamarkt.be, mediamarkt.ch, mediamarkt.lu, mediaworld.it, mediamarkt.com.tr, mediamarkt.hu |
+
+So a residential exit is necessary but not always sufficient: the safe
+assumption is that you need an exit the target site accepts, and an exit in
+that country is the obvious candidate. That was not tested for the eight
+above, so it is stated as an assumption rather than as a result.
+
+Saturn (saturn.de, saturn.at) is a sibling brand on similar markup that is
+deliberately **not** in the list, because it is not in MediaMarkt's hreflang
+set and has not been checked.
 
 ---
 
@@ -384,11 +399,14 @@ More in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 Everything above was measured rather than estimated. The numbers come from
 live runs on **2026-09-09** from a German residential exit against
-`mediamarkt.de`, and from twenty page captures taken the same day. The
-offline suite pins the field values from those captures, so a change in the
-site's markup fails a test rather than quietly emptying a column.
+`mediamarkt.de`, `mediamarkt.es` and `mediamarkt.pl`, and from twenty-odd
+page captures taken the same day. The offline suite pins the field values
+from those captures — including a Polish listing, which is a second language,
+a non-euro currency and one of the two hosts that answer without a `www.`
+prefix — so a change in the site's markup fails a test rather than quietly
+emptying a column.
 
-`smoke_test.py`: **255 checks**, no network, no browser, no credentials.
+`smoke_test.py`: **269 checks**, no network, no browser, no credentials.
 
 ---
 

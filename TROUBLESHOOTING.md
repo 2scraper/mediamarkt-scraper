@@ -38,8 +38,17 @@ the same request returns the full page. So:
 | A real page with a heading and sub-category links, no product grid | a **hub category** — see below, this is exit 4, not 3 |
 
 **The fix** is a residential exit: `--proxy-file exits.txt`, or
-`--cdp-endpoint` pointing at a Scraping Browser session with
-`country-de` in it.
+`--cdp-endpoint` pointing at a Scraping Browser session with the right
+`country-` in it.
+
+**And "residential" is necessary, not always sufficient.** Which exits a site
+accepts is not uniform across the group. One German residential address on
+2026-09-09 was accepted by `mediamarkt.de`, `mediamarkt.es` and
+`mediamarkt.pl`, and refused with 403 by `mediamarkt.at`, `mediamarkt.nl`,
+`mediamarkt.be`, `mediamarkt.ch`, `mediamarkt.lu`, `mediaworld.it`,
+`mediamarkt.com.tr` and `mediamarkt.hu`. If a site refuses you from a good
+residential address, try one in that site's own country before concluding
+anything about the code.
 
 ---
 
@@ -74,12 +83,22 @@ Check `price_source` first. It is in every row for exactly this reason.
 | Value | Meaning | If this is unexpected |
 |---|---|---|
 | `jsonld+dom` | The structured price and the rendered tile agreed. | Nothing to look at — this is 100% of rows on every page measured. |
-| `jsonld` | Structured data only; no tile was found to confirm against. | The tile markup has moved. `original_price` and `lowest_price_30d` come from the tile ONLY, so they will be empty. |
+| `jsonld` | Structured data only; no tile was found to confirm against. | The tile markup has moved, or the tile join is failing. `original_price` and `lowest_price_30d` come from the tile ONLY, so they will be empty. See below. |
 | `dom` | No structured data at all; the price was read off the markup. | The JSON-LD is gone. Every column except `url` and `sku` is now weaker. |
 
 Every run prints DOM-confirmation coverage per page and warns below 90%, so a
 tile-markup change shows up in the log rather than as a quietly emptier
 output.
+
+**If confirmation is 0% on a whole site**, the join between a structured row
+and its rendered tile is failing rather than the markup having moved. That
+has happened once, and the cause is worth knowing: `mediamarkt.pl` and
+`mediamarkt.lu` answer without a `www.` prefix, and a parser that rebuilds
+product URLs as `https://www.{host}{path}` produces an address that never
+matches the page's own. The rows, titles and prices stay perfectly correct
+throughout, because those come from the structured data — only the two
+DOM-only columns disappear. Fixed here; if you see the same shape somewhere
+else, that is where to look.
 
 **Columns that are empty on purpose**, so you do not go looking:
 
@@ -203,7 +222,7 @@ per engine.
 
 ## Something else
 
-`python3 smoke_test.py` runs 255 checks with no network, no browser and no
+`python3 smoke_test.py` runs 269 checks with no network, no browser and no
 credentials. If it passes and a live run still misbehaves, the problem is in
 the fetch rather than the parse — which narrows it to the exit address, the
 engine, or the URL. If it fails, the message names the check.

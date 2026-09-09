@@ -761,7 +761,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # listing, not of the page — and reported in the sidecar so a consumer
     # can see what fraction of a category a run took.
     if args.mode == "listing" and page_num == 1:
-        outcome.total_available = total_results(html)
+        outcome.total_available = total_results(html, shown=len(products))
         if outcome.total_available and products:
             pages_needed = -(-outcome.total_available // len(products))
             if args.pages > pages_needed:
