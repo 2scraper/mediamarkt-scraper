@@ -1259,8 +1259,8 @@ def test_engines(skips):
                     "scroll_until_stable" not in src and "page_flow.hydrate" not in src)
         # Credentials never reach a log, in any engine.
         ok &= check("%s masks credentials globally, not just once" % name,
-                    "SECRET" not in mod._mask_credentials(
-                        "a ws://u:SECRET@h:1/ b ws://u:SECRET@h:1/"))
+                    "pass@" not in mod._mask_credentials(
+                        "a ws://user:pass@h:1/ b ws://user:pass@h:1/"))
         ok &= check("%s refuses a host that is not MediaMarkt" % name,
                     "is_supported_host" in src)
         # Both modes, and only both.

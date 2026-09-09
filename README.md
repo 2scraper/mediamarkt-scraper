@@ -121,7 +121,7 @@ python3 playwright_scraper.py \
 # Through the Scraping Browser API instead of a local browser
 python3 playwright_scraper.py \
   --url "https://www.mediamarkt.de/de/category/grills-116.html" \
-  --cdp-endpoint "ws://LOGIN-zone-scraping_browser-country-de-pid-PROFILE:PASS@cb.2captcha.com:9222"
+  --cdp-endpoint "ws://{login}-zone-scraping_browser-country-de-pid-{profileId}:{password}@cb.2captcha.com:9222"
 ```
 
 Credentials belong in `.env`, never on a command line — a secret in `argv` is
