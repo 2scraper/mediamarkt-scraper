@@ -212,3 +212,55 @@ jobs:
 
       - name: The ${{ matrix.engine }} CLI answers --help
         run: .venv/bin/python ${{ matrix.engine }}_scraper.py --help >/dev/null
+
+  # The Dockerfile ships a runnable image and NOTHING was building it, which
+  # is how it came to be broken: `proxy_pool.py` was left out of the COPY
+  # list while the entrypoint imports it at module level, so the container
+  # died with ModuleNotFoundError on every invocation — `--help` included.
+  #
+  # smoke_test.py now checks the COPY list against the entrypoint's import
+  # graph without needing Docker, and that catches a missing module. It
+  # cannot catch the one step only a real build proves: `playwright install
+  # --with-deps chromium` pulling Chromium's shared libraries into
+  # python:3.12-slim. That is what this job is for.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        # Plain `docker build`, no registry and no push: the point is that the
+        # Dockerfile still builds, not that anything is published.
+        run: docker build -t mediamarkt-scraper:ci .
+
+      - name: The entrypoint runs inside the image
+        # Its CMD is --help, so a bare `run` exercises the default path. This
+        # is the invocation the broken image failed on.
+        run: docker run --rm mediamarkt-scraper:ci
+
+      - name: Chromium is actually installed in the image
+        # `playwright install` is the step this job exists to prove, so check
+        # the browser is there rather than trusting that the layer succeeded.
+        run: |
+          docker run --rm --entrypoint python3 mediamarkt-scraper:ci -c "
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              b = p.chromium.launch()
+              print('chromium', b.version)
+              b.close()"
+
+      - name: The image carries no credentials and no test material
+        # It COPYs an explicit list precisely so that it does not. Verify
+        # rather than assume: a `.env` baked into an image is a credential
+        # published to everyone who can pull it.
+        run: |
+          set -e
+          missing=0
+          for f in .env smoke_test.py tests sample_output.json; do
+            if docker run --rm --entrypoint sh mediamarkt-scraper:ci -c "test -e /app/$f"; then
+              echo "::error::$f is inside the image and should not be"
+              missing=1
+            fi
+          done
+          test "$missing" = "0"
+          echo "no .env, no test suite, no fixtures in the image"
