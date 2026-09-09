@@ -1,0 +1,254 @@
+name: canary
+
+# tests.yml (deliberately) never touches mediamarkt.de — see its own header
+# for why. That leaves a real gap: a markup change on the site itself only
+# shows up when a user hits it and files an issue, while the offline badge
+# stays green throughout. This workflow is the other half — a real run, on a
+# real category URL, on a schedule — so a site-side break is caught here first.
+#
+# THIS CANARY CANNOT RUN WITHOUT A PROXY SECRET, AND THAT IS NOT PESSIMISM.
+# ------------------------------------------------------------------------
+# The sibling repos in this family run their canary from a bare GitHub runner
+# and mostly get away with it. This one cannot. Measured 2026-09-09 from a
+# datacentre address, on five MediaMarkt hosts, in a real headless Chromium as
+# well as a plain HTTP client: HTTP 403 on every URL, every time, with the
+# shop's own branded error page. GitHub Actions runners are datacentre
+# addresses. A canary here without a residential exit would be red every
+# single day — and a check that is always red teaches everyone to ignore
+# checks, which is worse than having no check at all.
+#
+# So the live steps below are SKIPPED, not failed, when the secret is absent.
+# The job goes green with a notice saying why. Set the secret and the same
+# workflow starts doing real work with no edit:
+#
+#     gh secret set MEDIAMARKT_PROXY --repo 2scraper/mediamarkt-scraper
+#
+# It must be a RESIDENTIAL exit, and for this URL a German one — the site
+# geo-redirects a cookie-less visit on the exit IP, and a run redirected to
+# another country site fails the `source` check below on purpose.
+#
+# The secret is passed through the ENVIRONMENT, which env_config.py reads for
+# exactly this variable, rather than through a --proxy flag. Two reasons: a
+# credential on a command line is readable by anything that can run `ps`,
+# which is the rule this repo states and should therefore follow in its own
+# CI; and an unset secret arrives as an empty string, which the loader already
+# treats as "not configured", so there is no commented-out line for someone to
+# forget to uncomment.
+on:
+  schedule:
+    # Once a day, off the hour, so it is not competing with everyone else's
+    # on-the-hour cron jobs for runner availability.
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  live-run:
+    runs-on: ubuntu-latest
+    # `secrets` is not available in a job-level `if`, so presence is tested
+    # through the job environment and read in each step's `if`.
+    env:
+      HAVE_PROXY: ${{ secrets.MEDIAMARKT_PROXY != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Explain a skipped run
+        if: env.HAVE_PROXY != 'true'
+        run: |
+          echo "::notice::Skipping the live run: no MEDIAMARKT_PROXY secret is set."
+          echo "MediaMarkt answers every datacentre address with HTTP 403, and a"
+          echo "GitHub runner is one, so a run from here would be red every day"
+          echo "whatever the state of the code. Set a residential German exit as"
+          echo "the MEDIAMARKT_PROXY repository secret to turn this canary on:"
+          echo
+          echo "    gh secret set MEDIAMARKT_PROXY --repo 2scraper/mediamarkt-scraper"
+          echo
+          echo "The offline suite (tests.yml) covers everything that does not"
+          echo "need the network, and it runs on every push."
+
+      - uses: actions/setup-python@v5
+        if: env.HAVE_PROXY == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright engine
+        if: env.HAVE_PROXY == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-playwright.txt
+          playwright install --with-deps chromium
+
+      - name: Scrape a real, known-good category listing
+        id: run
+        if: env.HAVE_PROXY == 'true'
+        # A LEAF category with a real product grid, not a hub page: a hub
+        # (/de/category/notebooks-680.html) answers 200 with no products at
+        # all, which is a correct answer and would make this canary red for a
+        # reason that has nothing to do with the code.
+        #
+        # --pages 3, not 1: with one page pagination is never exercised, so a
+        # broken ?page= convention or a vanished link[rel=next] would stay
+        # invisible here — which is precisely the silent decay this workflow
+        # exists to catch. MediaMarkt keeps serving a valid page for any page
+        # number, so the run's own "this page added nothing new" terminator is
+        # what has to be trusted.
+        #
+        # set +e: GitHub Actions runs `run:` steps as `bash -e`, so without
+        # this a non-zero scraper exit aborts the script on THAT line and the
+        # `echo "exit_code=$?"` below never runs. continue-on-error only stops
+        # the step from failing the job; it does not touch the shell's errexit.
+        continue-on-error: true
+        env:
+          MEDIAMARKT_PROXY: ${{ secrets.MEDIAMARKT_PROXY }}
+        run: |
+          set +e
+          python3 playwright_scraper.py \
+            --url "https://www.mediamarkt.de/de/category/k%C3%BChlen-gefrieren-32.html" \
+            --pages 3 --out canary_run --dump-html canary_run.html
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Interpret the exit code
+        if: env.HAVE_PROXY == 'true'
+        run: |
+          code="${{ steps.run.outputs.exit_code }}"
+          case "$code" in
+            0)   echo "OK — products parsed from a live run." ;;
+            3)   echo "::error::Blocked before parsing (exit 3). On this site that means the exit address was refused, NOT that a captcha needs solving — MediaMarkt's block page carries no challenge. Check that MEDIAMARKT_PROXY is still a working residential exit before suspecting the site." ;;
+            4)   echo "::error::Ran fine but parsed 0 rows (exit 4) on a leaf category known to have thousands. Either the site changed, or this URL has become a hub page. The HTML dump in the artifacts tells you which." ;;
+            6)   echo "::error::Partial run (exit 6) — some pages were gathered and then the run stopped early. canary_run.meta.json names which pages failed; a mid-run block usually means one address is being pushed too hard." ;;
+            2)   echo "::error::Bad usage (exit 2) — the workflow's own arguments are wrong, not the site." ;;
+            *)   echo "::error::Unexpected exit code $code (see the step above for the traceback)." ;;
+          esac
+          test "$code" = "0"
+
+      - name: Sanity-check the scraped data
+        if: env.HAVE_PROXY == 'true'
+        # Exit 0 only means "some rows were written". It says nothing about
+        # whether the page actually rendered: a snapshot taken too early still
+        # writes rows, just with fields empty. Every floor below is set from a
+        # measured figure and deliberately under it, so this fails on a
+        # collapse rather than on normal variation.
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          from pathlib import Path
+
+          PAGES_REQUESTED = 3
+          # Measured 2026-09-09 from a German residential exit: 3 pages of this
+          # category gave exactly 36 rows, 12 per page, 0 duplicates. The floor
+          # is two pages' worth, so a short final page cannot trip it.
+          MIN_ROWS = 24
+          # Every row of every page measured carried a price, because the price
+          # is in the structured data rather than withheld per offer. Unlike a
+          # site that hides some prices, this floor can be high.
+          MIN_PRICED_SHARE = 0.9
+          # Rows whose structured price was CONFIRMED against a rendered tile.
+          # 100% on every page measured. This is the number that goes quietly
+          # wrong when the tile markup moves: the prices stay right while
+          # original_price and lowest_price_30d empty out.
+          MIN_CONFIRMED_SHARE = 0.9
+
+          rows = json.loads(Path("canary_run.json").read_text())
+          meta = json.loads(Path("canary_run.meta.json").read_text())
+          fail = []
+
+          if len(rows) < MIN_ROWS:
+              fail.append(f"only {len(rows)} rows, expected at least {MIN_ROWS} "
+                          f"across {PAGES_REQUESTED} pages")
+
+          priced = sum(1 for r in rows if r.get("price") is not None)
+          if rows and priced / len(rows) < MIN_PRICED_SHARE:
+              fail.append(f"only {priced}/{len(rows)} rows have a price "
+                          f"(floor {MIN_PRICED_SHARE:.0%}) — the price is in the "
+                          f"page's structured data, so this means the JSON-LD "
+                          f"changed shape")
+
+          confirmed = sum(1 for r in rows if r.get("price_source") == "jsonld+dom")
+          if rows and confirmed / len(rows) < MIN_CONFIRMED_SHARE:
+              fail.append(f"only {confirmed}/{len(rows)} rows were confirmed "
+                          f"against a rendered tile (floor "
+                          f"{MIN_CONFIRMED_SHARE:.0%}) — the tile markup has "
+                          f"probably moved, which empties original_price and "
+                          f"lowest_price_30d without touching the row count")
+
+          # Fields that were 100% populated on every page measured. Any of them
+          # collapsing means an anchor moved. `rating` is deliberately low:
+          # 62 of 84 rows carried one, because plenty of products have no
+          # reviews yet and this parser reports that as null rather than 0.
+          for field, floor in (("title", 0.95), ("sku", 1.0), ("url", 1.0),
+                               ("currency", 0.95), ("image_url", 0.95),
+                               ("category", 1.0), ("review_count", 0.9),
+                               ("rating", 0.4)):
+              got = sum(1 for r in rows if r.get(field) not in (None, ""))
+              if rows and got / len(rows) < floor:
+                  fail.append(f"{field} present on only {got}/{len(rows)} rows "
+                              f"(floor {floor:.0%})")
+
+          # THE TRAP. MediaMarkt renders two struck-through prices: the UVP,
+          # which is a real old price, and "Tiefstpreis (30 Tage)", the lowest
+          # price of the last 30 days, which is normally BELOW the current one.
+          # Reading the second into original_price produces negative discounts
+          # on products that are not discounted at all. If that regression ever
+          # ships, this is where it surfaces.
+          crossed = [r["sku"] for r in rows
+                     if r.get("original_price") and r.get("price")
+                     and r["original_price"] <= r["price"]]
+          if crossed:
+              fail.append(f"{len(crossed)} row(s) have an original_price at or "
+                          f"below their price: {crossed[:3]} — the UVP and the "
+                          f"30-day-low nodes are being confused")
+          negative = [r["sku"] for r in rows
+                      if r.get("discount_pct") is not None and r["discount_pct"] <= 0]
+          if negative:
+              fail.append(f"{len(negative)} row(s) have a discount of zero or "
+                          f"less: {negative[:3]}")
+
+          # A rating is out of five. Zero is the star widget's EMPTY state on
+          # this site, not a score, and reading it literally once filled the
+          # column on every row of a run.
+          bad_rating = [r["sku"] for r in rows
+                        if r.get("rating") is not None
+                        and not (0 < r["rating"] <= 5)]
+          if bad_rating:
+              fail.append(f"{len(bad_rating)} row(s) have a rating outside "
+                          f"(0, 5]: {bad_rating[:3]}")
+
+          # The point of running more than one page.
+          if meta.get("pages_completed", 0) < PAGES_REQUESTED:
+              fail.append(f"pagination stopped after {meta.get('pages_completed')} "
+                          f"of {PAGES_REQUESTED} pages (stop_reason="
+                          f"{meta.get('stop_reason')!r}) — link[rel=next] or the "
+                          f"?page= convention has probably broken")
+          if meta.get("status") != "complete":
+              fail.append(f"run status is {meta.get('status')!r}, not 'complete'")
+          if meta.get("mode") != "listing":
+              fail.append(f"run mode is {meta.get('mode')!r}, not 'listing'")
+          if meta.get("source") != "mediamarkt.de":
+              fail.append(f"run source is {meta.get('source')!r} — the exit IP "
+                          f"was geo-redirected to another country site, so the "
+                          f"prices are in another market and possibly another "
+                          f"currency")
+
+          for line in fail:
+              print(f"::error::{line}")
+          print(f"[canary] {len(rows)} rows, {priced} priced, "
+                f"{confirmed} DOM-confirmed, status={meta.get('status')}, "
+                f"pages={meta.get('pages_completed')}/{PAGES_REQUESTED}")
+          sys.exit(1 if fail else 0)
+          EOF
+
+      - name: Upload run artifacts (output, HTML snapshot, debug dumps)
+        # Always, not just on failure: a run that returns the WRONG numbers
+        # with no error is exactly the regression that needs the actual bytes
+        # the parser saw, not a pass/fail badge.
+        if: always() && env.HAVE_PROXY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: canary-run-${{ github.run_id }}
+          path: |
+            canary_run.json
+            canary_run.csv
+            canary_run.meta.json
+            canary_run.html*
+            canary_run_page*_debug.*
+          if-no-files-found: ignore
+          retention-days: 14
