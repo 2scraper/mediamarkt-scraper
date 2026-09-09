@@ -188,26 +188,81 @@ def get_fingerprint(api_key: str, *, tags: Optional[str] = None,
         with open(_cache_path(cache_dir, params, generate), "w", encoding="utf-8") as f:
             json.dump(fp, f, indent=2)
     logger.info("Fingerprint %s (%s) — %s", fp.get("id"), fp.get("country"),
-                (fp.get("userAgent") or {}).get("value", "")[:70])
+                (fingerprint_user_agent(fp) or "no user agent in response")[:70])
     return fp
 
 
+def fingerprint_user_agent(fp: dict) -> Optional[str]:
+    """The UA string, from wherever this response shape keeps it.
+
+    `chromium` format nests it as `userAgent.userAgent`; `raw` format puts it
+    at `data.ua`. An earlier version read `userAgent.value`, which exists in
+    NEITHER — so `--fingerprint` silently never set a user agent at all, and
+    the browser kept its own. That is safe on its own but defeats the point
+    of the flag: the run then presented a German fingerprint's screen and
+    locale with a local Chromium's UA, which is the identity MISMATCH the
+    flag exists to avoid.
+    """
+    ua = fp.get("userAgent")
+    if isinstance(ua, dict):
+        for key in ("userAgent", "value", "ua"):
+            if ua.get(key):
+                return ua[key]
+    if isinstance(ua, str) and ua:
+        return ua
+    data = fp.get("data")
+    if isinstance(data, dict) and data.get("ua"):
+        return data["ua"]
+    return None
+
+
 def playwright_context_kwargs(fp: dict) -> dict:
-    """The parts of a fingerprint Playwright can set natively on a context."""
+    """The parts of a fingerprint Playwright can set natively on a context.
+
+    Everything here comes from the fingerprint itself rather than being
+    derived from it. A derived value is a guess wearing the fingerprint's
+    authority, and the guesses this used to make were poor ones — see
+    `locale` below.
+    """
     kwargs = {}
-    ua = (fp.get("userAgent") or {}).get("value")
+    ua = fingerprint_user_agent(fp)
     if ua:
         kwargs["user_agent"] = ua
+
     screen = fp.get("screen") or {}
     if screen.get("width") and screen.get("height"):
-        # A real window is smaller than the screen; a viewport exactly equal to
-        # screen size is itself a signal.
-        kwargs["viewport"] = {"width": int(screen["width"]),
-                              "height": max(400, int(screen["height"]) - 120)}
-        kwargs["screen"] = {"width": int(screen["width"]), "height": int(screen["height"])}
-    country = fp.get("country")
-    if country:
-        kwargs["locale"] = f"en-{country.upper()}"
+        width, height = int(screen["width"]), int(screen["height"])
+        # The window, not the screen: a viewport exactly equal to screen size
+        # is itself a signal. The fingerprint states its own outer size, so
+        # use that when it is there and fall back to an estimate when it is
+        # not.
+        outer_w = int(screen.get("outerWidth") or width)
+        outer_h = int(screen.get("outerHeight") or max(400, height - 120))
+        kwargs["viewport"] = {"width": outer_w, "height": max(400, outer_h)}
+        kwargs["screen"] = {"width": width, "height": height}
+
+    intl = fp.get("intl") or {}
+    # The fingerprint's OWN locale. This used to be built as
+    # f"en-{country}", which produced "en-DE" for a German fingerprint — an
+    # English-speaking visitor in Germany is possible but it is not what the
+    # fingerprint describes, and a locale that contradicts the rest of the
+    # identity is exactly the mismatch this flag is meant to prevent. The
+    # real value here is "de-DE".
+    locale = intl.get("contentLocale")
+    if not locale:
+        languages = intl.get("languages")
+        if isinstance(languages, list) and languages:
+            locale = languages[0]
+    if not locale and fp.get("country"):
+        locale = "en-%s" % fp["country"].upper()
+    if locale:
+        kwargs["locale"] = locale
+
+    # Playwright can set the timezone natively, and a fingerprint that says
+    # Europe/Berlin while the browser reports UTC contradicts itself in a way
+    # any script can read.
+    if intl.get("timeZone"):
+        kwargs["timezone_id"] = intl["timeZone"]
     return kwargs
 
 
