@@ -11,6 +11,78 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.4] — 2026-09-09
+
+The paths that needed a 2Captcha key, run for the first time. Both worked;
+both had a defect the first real call exposed, and one of them was a
+credential leak.
+
+### Fixed
+
+- **The API key was printed to the terminal.** `fingerprint_client.py` sends
+  the key as a QUERY parameter, and `requests` puts the full URL — query
+  string included — into the text of `HTTPError` and of every connection
+  error. A 400 from the fingerprint endpoint therefore printed a live key.
+  Every error surfaced from that module and from `captcha_solver.py`'s v1
+  polling call (the other place the key rides in a URL) is now redacted
+  before it is raised or logged; the endpoint and status survive, because
+  which call failed is the useful half and is not the secret.
+- **`scraper_api_client.py` reported a block as an empty result.** It threw
+  away the upstream HTTP status and looked only for a challenge marker — and
+  MediaMarkt's 403 page carries none — so a refused request came back exit 4
+  ("zero products") instead of exit 3 ("blocked"). A pipeline branching on
+  the exit code would have read a block as an empty category. It now
+  classifies the upstream response with the same `detect_page_state` the
+  three browser engines reach through `page_flow`.
+- **The documented `--tags` example never worked.** `"Windows,Chrome,Desktop"`
+  returns HTTP 400 from the fingerprint API every time. Measured against the
+  live endpoint: `tags` takes ONE OS-family value — `Windows`,
+  `Microsoft Windows` and `Android` are accepted; `Chrome`, `Desktop`,
+  `Mobile` and `Unknown` are rejected, and no combination is accepted with
+  any separator. The plural name and a fingerprint's own multi-valued
+  `data.tags` are what make the list form look plausible. The help text now
+  says which values work, and a 400 names the likely cause.
+
+### Verified
+
+- **`--fingerprint`, live**: fetched, cached and applied to the browser
+  context (fingerprint 3088631, DE). MediaMarkt still answered 403 from a
+  datacentre address, which is the point — the fingerprint is not what that
+  check is about.
+- **`scraper_api_client.py`, live**, and the result is worth knowing:
+
+      without --cdp-url   upstream 403,    13,922 bytes, 0 products -> exit 3
+      with    --cdp-url   upstream 200, 1,693,678 bytes, 12 products -> exit 0
+                          12/12 confirmed against a rendered tile, EUR
+
+  The Scraper API's own exit is refused by this site like every other
+  datacentre address, so `--cdp-url` is not optional here. At $0.0005 a task
+  it is the cheapest way to read this site once a residential session is in
+  the path.
+- **The concurrent dispatch machinery**, which no live run in this
+  environment can reach — page 1 is always fetched alone and decides whether
+  the rest may be addressed, so a blocked page 1 means the workers never
+  start. Now driven directly with the browser stubbed out: every queued page
+  fetched exactly once across workers, outcomes restorable to page order, the
+  end-of-listing event stopping dispatch (4 fetches against 49 queued pages),
+  unattempted pages reported rather than counted as failed, and a worker that
+  raises neither hanging the run nor losing its siblings' pages.
+- `--concurrency` is correctly refused with `--cdp-endpoint`, and
+  `--fingerprint` correctly ignored with it.
+
+### Still not run
+
+A live `--concurrency` fan-out and `--proxy-file` rotation against the real
+site. Not a credential problem: Chromium cannot reach an HTTP proxy from the
+environment this was built in at all (a raw CONNECT to the proxy port hangs
+while `requests` through the same proxy succeeds), so no proxy would change
+it. The decision logic and the dispatch machinery are both covered offline;
+what remains unverified is real browsers on real exits.
+
+`smoke_test.py`: 311 checks, up from 301.
+
+---
+
 ## [0.1.3] — 2026-09-09
 
 Three defects found by running the things nothing had run yet: the second
@@ -285,6 +357,7 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.4]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.3
 [0.1.2]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.2
 [0.1.1]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.1

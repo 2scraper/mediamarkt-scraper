@@ -18,7 +18,7 @@ API surface used
   GET https://api.2captcha.com/fingerprint/generate
     key           your API key (also accepted as clientKey)
     format        "chromium" (default) | "raw"
-    tags          platform/OS/browser filters, e.g. "Windows,Chrome,Desktop"
+    tags          ONE OS-family tag, e.g. "Windows". Not a list — see --tags
     country       ISO 3166-1 alpha-2
     min_browser_version / browser_version / force_browser_version
     build_version full version string — /generate only
@@ -50,11 +50,11 @@ does this below the JS layer.
 
 Usage
 -----
-    python3 fingerprint_client.py --tags "Windows,Chrome,Desktop" --country us
+    python3 fingerprint_client.py --tags Windows --country de
     python3 fingerprint_client.py --generate --build-version 145.0.7632.162
 
     # in code, with Playwright:
-    fp = get_fingerprint(api_key, tags="Windows,Chrome,Desktop", country="us")
+    fp = get_fingerprint(api_key, tags="Windows", country="de")
     context = browser.new_context(**playwright_context_kwargs(fp))
     context.add_init_script(playwright_init_script(fp))
 
@@ -65,6 +65,7 @@ import argparse
 import hashlib
 import json
 import logging
+import re
 import os
 import sys
 from typing import Optional
@@ -73,6 +74,24 @@ import requests
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("fingerprint_client")
+
+
+# An API key must never reach a log, and the easiest way for one to get there
+# is an exception message. `requests` puts the FULL URL — query string and all
+# — into the text of HTTPError and of every connection error, so any endpoint
+# that takes its key as a query parameter leaks it the moment something goes
+# wrong. That is not hypothetical: a 400 from the fingerprint endpoint printed
+# a live key to the terminal.
+#
+# Everything raised or logged from this module goes through here first. The
+# endpoint and the status survive, because which call failed is the useful
+# half and is not the secret.
+_KEY_IN_TEXT_RE = re.compile(
+    r"((?:client)?key|token|api[_-]?key)=([^&\s'\"]{6,})", re.IGNORECASE)
+
+
+def _redact(text) -> str:
+    return _KEY_IN_TEXT_RE.sub(r"\1=***", str(text))
 
 API_BASE = "https://api.2captcha.com"
 RANDOM_URL = f"{API_BASE}/fingerprint/random"
@@ -125,17 +144,43 @@ def get_fingerprint(api_key: str, *, tags: Optional[str] = None,
 
     url = GENERATE_URL if generate else RANDOM_URL
     logger.info("GET %s %s", url, {k: v for k, v in params.items()})
-    resp = requests.get(url, params={**params, "key": api_key}, timeout=timeout)
+    try:
+        resp = requests.get(url, params={**params, "key": api_key}, timeout=timeout)
+    except requests.RequestException as exc:
+        # The key is a query parameter on this endpoint, so the URL inside a
+        # connection error carries it. Re-raised redacted.
+        raise RuntimeError("Fingerprint API request failed: %s" % _redact(exc)) from None
 
     if resp.status_code == 401:
         raise RuntimeError("Fingerprint API rejected the key (401). Note this is a "
                            "separate subscription from captcha solving — a working "
                            "solver key is not automatically enabled for fingerprints.")
+    if resp.status_code == 400:
+        # Say what the API said, and name the overwhelmingly likely cause.
+        # `tags` takes ONE OS-family value; a list — which the plural name and
+        # a fingerprint's own multi-valued `data.tags` both invite — is
+        # rejected outright. Measured 2026-09-09; see --tags.
+        try:
+            detail = resp.json().get("errorDescription") or resp.text[:200]
+        except ValueError:
+            detail = resp.text[:200]
+        hint = ""
+        if tags and any(sep in tags for sep in (",", "|", " ")):
+            hint = (" — `tags` takes ONE OS-family value (Windows, "
+                    "Microsoft Windows, Android), not a list; you passed %r"
+                    % tags)
+        raise RuntimeError("Fingerprint API rejected the request (400): %s%s"
+                           % (_redact(detail), hint))
     if resp.status_code == 429:
         raise RuntimeError("Fingerprint API rate limit hit (429). The per-minute cap "
                            "depends on your plan (30/100/300/unlimited). Cache the "
                            "result instead of fetching per request.")
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        # requests puts resp.url — including `key=...` — into this message.
+        raise RuntimeError("Fingerprint API returned %s: %s"
+                           % (resp.status_code, _redact(exc))) from None
     fp = resp.json()
 
     if cache_dir:
@@ -213,7 +258,18 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Fetch a browser fingerprint from 2captcha")
     p.add_argument("--key", default=os.environ.get("TWOCAPTCHA_KEY"),
                    help="API key. Defaults to $TWOCAPTCHA_KEY (safer than argv).")
-    p.add_argument("--tags", default=None, help='e.g. "Windows,Chrome,Desktop"')
+    # Measured against the live API on 2026-09-09, because the example this
+    # file used to carry ("Windows,Chrome,Desktop") returns 400 every time:
+    #   accepted -> Windows, Microsoft Windows, Android
+    #   rejected -> Chrome, Desktop, Mobile, Unknown, and EVERY combination,
+    #               with any separator tried (comma, space, pipe)
+    # A returned fingerprint's own `data.tags` lists several values, which is
+    # what makes the plural form look plausible; the filter takes one.
+    p.add_argument("--tags", default=None, metavar="TAG",
+                   help="ONE OS-family tag, not a list: Windows, "
+                        "Microsoft Windows or Android. Chrome/Desktop/Mobile "
+                        "are rejected by the API with 400, and no combination "
+                        "is accepted. Use --country to narrow further.")
     p.add_argument("--country", default=None, help="ISO 3166-1 alpha-2, e.g. us")
     p.add_argument("--min-browser-version", type=int, default=None)
     p.add_argument("--browser-version", type=int, default=None)

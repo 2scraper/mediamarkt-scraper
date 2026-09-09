@@ -49,6 +49,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import tempfile
 from dataclasses import fields
 
@@ -1599,6 +1600,118 @@ def _undefined_names(path):
     return missing
 
 
+class _FakeSession:
+    """Stands in for a _BrowserSession: opened, closed, carries a pool."""
+
+    def __init__(self, pool=None):
+        self.pool = pool
+        self.closed = False
+
+    def open(self):
+        return self
+
+    def close(self):
+        self.closed = True
+
+
+class _FakePlaywright:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_concurrent_dispatch(skips):
+    group("concurrent page dispatch (threads, stop event, accounting)")
+    ok = True
+    try:
+        import playwright_scraper as eng
+    except ImportError as e:
+        skips.append("concurrent dispatch (%s)" % e)
+        return ok
+
+    # The thread fan-out is the one part of --concurrency that the rest of
+    # this suite does not reach, and it is not reachable from a live run in
+    # every environment either: page 1 is always fetched alone and decides
+    # whether the rest may be addressed, so a blocked page 1 means the
+    # workers never start. Driven here with the browser stubbed out, which
+    # leaves exactly the concurrency logic under test.
+    original = (eng.sync_playwright, eng._BrowserSession, eng._fetch_one_page)
+
+    class Args:
+        delay = 0
+        mode = "listing"
+        out = "x"
+
+    def run(specs, concurrency, rows_for_page, die_on=()):
+        fetched, lock = [], threading.Lock()
+
+        def fake_fetch(session, args, pool, page_num, url):
+            with lock:
+                fetched.append(page_num)
+            if page_num in die_on:
+                raise RuntimeError("worker blew up on page %d" % page_num)
+            outcome = eng.PageOutcome(page_num=page_num, url=url)
+            outcome.products = rows_for_page(page_num)
+            return outcome
+
+        eng.sync_playwright = lambda: _FakePlaywright()
+        eng._BrowserSession = lambda pw, args, pool, **kw: _FakeSession(pool)
+        eng._fetch_one_page = fake_fetch
+        try:
+            results, unattempted, exhausted = eng._fetch_pages_concurrently(
+                Args(), None, specs, concurrency)
+        finally:
+            (eng.sync_playwright, eng._BrowserSession,
+             eng._fetch_one_page) = original
+        return fetched, results, unattempted, exhausted
+
+    # 1. Every page fetched exactly once, whatever the worker count.
+    specs = [(n, "u%d" % n) for n in range(2, 12)]
+    fetched, results, unattempted, exhausted = run(
+        specs, 4, lambda n: ["row"])
+    ok &= check("every queued page is fetched exactly once",
+                sorted(fetched) == [n for n, _ in specs])
+    ok &= check("every page produces an outcome",
+                sorted(o.page_num for o in results) == [n for n, _ in specs])
+    ok &= check("nothing is left unattempted when the listing does not end",
+                unattempted == [] and not exhausted)
+
+    # 2. Results arrive in whatever order the threads finish, which is
+    #    exactly why the caller merges by page number instead of by arrival.
+    #    Sorting them must reconstruct the page order.
+    ok &= check("outcomes can be put back into page order",
+                [o.page_num for o in sorted(results, key=lambda o: o.page_num)]
+                == [n for n, _ in specs])
+
+    # 3. The stop event. Asking for 50 pages of a listing that ends at page 5
+    #    must not fetch 45 empty ones: workers check the event before taking
+    #    more work, so at most (concurrency - 1) extra are already in flight.
+    specs = [(n, "u%d" % n) for n in range(2, 51)]
+    fetched, results, unattempted, exhausted = run(
+        specs, 3, lambda n: [] if n >= 5 else ["row"])
+    ok &= check("the end of the listing stops dispatch", exhausted)
+    ok &= check("an exhausted listing costs at most (concurrency-1) extra "
+                "fetches (%d fetched of 49 queued)" % len(fetched),
+                len(fetched) <= 4 + 3)
+    ok &= check("the pages never tried are reported, not counted as failed",
+                unattempted and all(o.ok for o in results))
+    ok &= check("unattempted pages are reported in order",
+                unattempted == sorted(unattempted))
+
+    # 4. A worker that dies must not hang the run, and must not swallow the
+    #    pages its siblings did fetch.
+    specs = [(n, "u%d" % n) for n in range(2, 8)]
+    fetched, results, unattempted, exhausted = run(
+        specs, 3, lambda n: ["row"], die_on={3})
+    ok &= check("a worker that raises does not hang the run",
+                len(results) + len(unattempted) + 1 >= len(specs))
+    ok &= check("the pages other workers fetched still come back",
+                any(o.page_num != 3 for o in results))
+    return ok
+
+
 def test_no_undefined_names():
     group("no engine references a name that does not exist")
     ok = True
@@ -1757,6 +1870,7 @@ def main() -> int:
     ok &= test_engines(skips)
     ok &= test_no_capture_leaks()
     ok &= test_wording()
+    ok &= test_concurrent_dispatch(skips)
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_copies_what_it_runs()
     ok &= test_sample_output()
