@@ -11,6 +11,50 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.1] — 2026-09-09
+
+Two silent bugs, both found by live-verifying a SECOND country site rather
+than by reading the code. Neither could show on `mediamarkt.de`, and neither
+produces an error: rows, titles and prices stay correct throughout, because
+they come from the structured data. Only the columns that depend on reading
+the rendered page disappear.
+
+### Fixed
+
+- **`mediamarkt.pl` and `mediamarkt.lu` lost their DOM-only columns
+  entirely.** Both answer without a `www.` prefix — their own hreflang
+  entries say so — while the parser rebuilt every product URL as
+  `https://www.{host}{path}`. The reconstructed address never matched the
+  page's own, so the join between a structured row and its rendered tile
+  failed on every row: `original_price` and `lowest_price_30d` always null,
+  `price_source` always `jsonld`. Measured on a live Polish listing before
+  the fix: 12 rows, 12 priced, **0 confirmed**; after: 12 of 12. URLs are now
+  resolved against the page's own address, and the tile join ignores `www.`,
+  percent-encoding and trailing tracking parameters.
+- **A product title was read as the catalogue counter.** Polish writes "of"
+  as a bare `z`, and the real title "ELECTROLUX LVM8E08Z 44l" contains
+  "8Z 44" — read as "8 of 44", so a listing reported a catalogue of 44
+  against its own printed 85. Only a text node that IS the count is accepted
+  now, and the engines pass the row count they actually parsed so the read is
+  checked rather than scanned for.
+
+### Changed
+
+- **Three country sites are now live-verified** — `.de`, `.es` and `.pl` —
+  each returning 12 products a page at 100% DOM confirmation, in EUR, EUR and
+  PLN. The README no longer claims only one.
+- **Documented that a residential exit is necessary but not always
+  sufficient.** One German address was accepted by `.de`, `.es` and `.pl` and
+  refused with 403 by the other eight sites. An exit in the target country is
+  the obvious answer and is stated as an assumption, because it was not
+  tested for those eight.
+- `smoke_test.py`: 269 checks, up from 255. The new Polish fixture is a
+  second language, a non-euro currency and the non-www host in one, and it
+  carries the decoy title beside a genuine counter so both regressions are
+  pinned rather than described.
+
+---
+
 ## [0.1.0] — 2026-09-09
 
 First release of the rewritten scraper. This replaces a much earlier
@@ -142,4 +186,5 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.1]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.1
 [0.1.0]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.0
