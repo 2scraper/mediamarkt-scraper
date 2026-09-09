@@ -11,6 +11,52 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.5] — 2026-09-09
+
+`--fingerprint` was applying almost none of the fingerprint. Found by reading
+what the API actually returns, after a key rotation made it worth re-running
+the path.
+
+### Fixed
+
+- **`--fingerprint` never set a user agent.** The UA was read from
+  `userAgent.value`, a key the API returns in NEITHER response format — it is
+  `userAgent.userAgent` in `chromium` and `data.ua` in `raw`. So the flag
+  silently left the browser on its own UA while replacing the screen and the
+  locale around it: a German fingerprint's identity wearing a local
+  Chromium's user agent, which is exactly the mismatch the flag exists to
+  prevent. Nothing errored, and the success log printed an empty string
+  where the UA should have been.
+- **The locale contradicted the fingerprint.** It was built as
+  `f"en-{country}"` — "en-DE" for a German fingerprint. The response carries
+  `intl.contentLocale`, which for that fingerprint is "de-DE". An
+  English-speaking visitor in Germany is possible; it is not what the
+  fingerprint describes, and a locale disagreeing with the rest of the
+  identity is a signal in itself.
+- **The timezone was not applied at all**, though the response states it
+  (`intl.timeZone`) and Playwright can set it. A fingerprint claiming
+  Europe/Berlin while the browser reports UTC contradicts itself in a way any
+  script can read.
+- **The window size was guessed** (`screen height - 120`) when the response
+  states its own `outerWidth`/`outerHeight`.
+
+Verified against a live browser: with a German Windows fingerprint applied,
+the page now reports that UA, `de-DE`, `Europe/Berlin` and a window smaller
+than the screen — all matching the fingerprint rather than the host.
+
+### Added
+
+- Tests for both of the above, plus the key-redaction added in 0.1.4, so
+  neither can regress. The fingerprint fixture is cut from a real
+  `format=chromium` response.
+- A check that every kwarg `playwright_context_kwargs` produces is one
+  `new_context` accepts — an unknown key is a TypeError at launch, on the
+  paid path, at runtime.
+
+`smoke_test.py`: 330 checks, up from 311.
+
+---
+
 ## [0.1.4] — 2026-09-09
 
 The paths that needed a 2Captcha key, run for the first time. Both worked;
@@ -357,6 +403,7 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.5]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.5
 [0.1.4]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.3
 [0.1.2]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.2

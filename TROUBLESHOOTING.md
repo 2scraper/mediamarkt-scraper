@@ -222,7 +222,7 @@ per engine.
 
 ## Something else
 
-`python3 smoke_test.py` runs 311 checks with no network, no browser and no
+`python3 smoke_test.py` runs 330 checks with no network, no browser and no
 credentials. If it passes and a live run still misbehaves, the problem is in
 the fetch rather than the parse — which narrows it to the exit address, the
 engine, or the URL. If it fails, the message names the check.

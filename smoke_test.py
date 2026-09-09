@@ -1622,6 +1622,117 @@ class _FakePlaywright:
         return False
 
 
+# A fingerprint in the shape the API actually returns, trimmed to the keys
+# this repo reads. Cut from a real `format=chromium` response on 2026-09-09;
+# the id and the exact pixel values are the only things changed, and only so
+# that nothing here looks like a specific machine.
+FIX_FINGERPRINT = {
+    "id": 1000000,
+    "country": "DE",
+    "userAgent": {
+        "userAgent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/146.0.0.0 Safari/537.36"),
+        "platform": "Windows",
+        "mobile": False,
+    },
+    "intl": {
+        "contentLocale": "de-DE",
+        "languages": ["de-DE", "de", "en-US", "en"],
+        "timeZone": "Europe/Berlin",
+    },
+    "screen": {"width": 1920, "height": 1080,
+               "outerWidth": 1920, "outerHeight": 992,
+               "deviceScaleFactor": 1},
+}
+
+
+def test_fingerprint_application():
+    group("a fingerprint is applied as the fingerprint describes it")
+    ok = True
+    import fingerprint_client as fpc
+
+    ua = fpc.fingerprint_user_agent(FIX_FINGERPRINT)
+    # The UA used to be read from `userAgent.value`, a key the API returns in
+    # NEITHER format. So --fingerprint silently set no user agent at all and
+    # the browser kept its own: a German fingerprint's screen and locale
+    # wearing a local Chromium's UA, which is precisely the identity mismatch
+    # the flag exists to avoid.
+    ok &= check("the user agent is found in the shape the API returns",
+                ua and ua.startswith("Mozilla/5.0 (Windows NT 10.0"))
+    ok &= check("the `raw` format's ua key is understood too",
+                fpc.fingerprint_user_agent({"data": {"ua": "UA/1.0"}}) == "UA/1.0")
+    ok &= check("a fingerprint with no user agent yields None, not a crash",
+                fpc.fingerprint_user_agent({"country": "DE"}) is None)
+
+    kw = fpc.playwright_context_kwargs(FIX_FINGERPRINT)
+    ok &= check("the context carries the fingerprint's user agent",
+                kw.get("user_agent") == ua)
+    # `locale` used to be built as f"en-{country}", giving "en-DE" for a
+    # German fingerprint. An English-speaking visitor in Germany is possible,
+    # but it is not what this fingerprint describes, and a locale that
+    # contradicts the rest of the identity is the mismatch again.
+    ok &= check("the locale is the fingerprint's own, not en-<country>",
+                kw.get("locale") == "de-DE")
+    ok &= check("the timezone is carried, so the browser cannot contradict it",
+                kw.get("timezone_id") == "Europe/Berlin")
+    # A viewport exactly equal to the screen is itself a signal, and the
+    # fingerprint states its own window size rather than needing one guessed.
+    ok &= check("the viewport is the fingerprint's window, not its screen",
+                kw.get("viewport") == {"width": 1920, "height": 992}
+                and kw.get("screen") == {"width": 1920, "height": 1080})
+
+    # Falling back sensibly when a field is absent, rather than dropping it.
+    bare = fpc.playwright_context_kwargs({"country": "FR", "screen":
+                                          {"width": 1280, "height": 800}})
+    ok &= check("a fingerprint with no intl block still gets a locale",
+                bare.get("locale") == "en-FR")
+    ok &= check("...and a window smaller than the screen",
+                bare["viewport"]["height"] < bare["screen"]["height"])
+    ok &= check("a fingerprint with nothing usable yields no kwargs",
+                fpc.playwright_context_kwargs({}) == {})
+
+    # Every key this produces must be one Playwright's new_context accepts;
+    # an unknown one is a TypeError at launch, on the paid path, at runtime.
+    accepted = {"user_agent", "viewport", "screen", "locale", "timezone_id",
+                "geolocation", "permissions", "extra_http_headers",
+                "device_scale_factor", "is_mobile", "has_touch", "color_scheme"}
+    ok &= check("every context kwarg is one Playwright accepts",
+                set(kw) <= accepted)
+    return ok
+
+
+def test_credentials_never_reach_a_log():
+    group("an API key never reaches a log or an exception message")
+    ok = True
+    import fingerprint_client as fpc
+    import captcha_solver as cs
+
+    # requests puts the FULL URL — query string included — into the text of
+    # HTTPError and of every connection error. Both of these modules have an
+    # endpoint that takes the key as a query parameter, so an error there
+    # echoed a live key to the terminal. It did, once, on a real call.
+    # An obviously fake key, and NOT a real one even a revoked one: a
+    # 32-hex string in a public repo reads as a live credential to every
+    # scanner that looks, including this repo's own CI grep. The word
+    # "example" in the name is what tells that grep this line is a fixture.
+    example_key = "0123456789abcdef0123456789abcdef"
+    for name, module in (("fingerprint_client", fpc), ("captcha_solver", cs)):
+        redacted = module._redact(
+            "400 Client Error: Bad Request for url: "
+            "https://api.2captcha.com/fingerprint/random?format=chromium&"
+            "key=%s" % example_key)
+        ok &= check("%s redacts a key out of an error message" % name,
+                    example_key not in redacted)
+        ok &= check("...and keeps the endpoint, which is the useful half",
+                    "api.2captcha.com/fingerprint/random" in redacted)
+        ok &= check("%s redacts clientKey too" % name,
+                    example_key not in module._redact("clientKey=%s" % example_key))
+        ok &= check("%s leaves ordinary text alone" % name,
+                    module._redact("upstream status 403") == "upstream status 403")
+    return ok
+
+
 def test_concurrent_dispatch(skips):
     group("concurrent page dispatch (threads, stop event, accounting)")
     ok = True
@@ -1870,6 +1981,8 @@ def main() -> int:
     ok &= test_engines(skips)
     ok &= test_no_capture_leaks()
     ok &= test_wording()
+    ok &= test_fingerprint_application()
+    ok &= test_credentials_never_reach_a_log()
     ok &= test_concurrent_dispatch(skips)
     ok &= test_no_undefined_names()
     ok &= test_dockerfile_copies_what_it_runs()
