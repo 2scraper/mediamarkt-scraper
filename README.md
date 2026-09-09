@@ -67,6 +67,7 @@ So what do the 2Captcha products buy here?
 | **Scraping Browser API** (`--cdp-endpoint`) | A browser you do not run or patch, with a persistent profile and a chosen exit country, in one endpoint instead of a proxy plus a local Chromium. |
 | **Captcha solving** (`--twocaptcha-key`) | **Not for the block page.** MediaMarkt's refusal is its own branded error page under a 403 with no challenge on it — nothing to solve, and this scraper does not try. The key is for the reCAPTCHA the site uses on account and checkout flows, and for fingerprints. |
 | **Fingerprints** (`--fingerprint`) | A consistent device identity across runs, matched to the exit country. |
+| **Scraper API** (`scraper_api_client.py`) | HTML over plain HTTPS, no browser to install. Measured 2026-09-09 at $0.0005 a page — the cheapest path here, but **only with `--cdp-url`**: the Scraper API's own exit is refused like every other datacentre address. |
 
 If you already have residential exits from somewhere else, this repo works
 with them: `--proxy-file` takes any list.
@@ -408,7 +409,7 @@ percent sign written before its number, and an instalment line in the same
 price block) — so a change in the site's markup fails a test rather than
 quietly emptying a column.
 
-`smoke_test.py`: **301 checks**, no network, no browser, no credentials.
+`smoke_test.py`: **311 checks**, no network, no browser, no credentials.
 
 ---
 

@@ -33,12 +33,23 @@ browser fidelity changes that, which is exactly why a browserless path loses
 nothing here: the browser was never what was being checked.
 
 So this engine's success depends entirely on where the Scraper API's own
-request leaves from. It fails loudly either way — a 403 page exits 3 rather
-than being written as a result.
+request leaves from — and that is now measured rather than reasoned about.
 
-**Untested against mediamarkt.de.** No Scraper API subscription was available
-while this repo was built, so unlike the three browser engines (each of which
-has live numbers in the README) this one has none. Treat it as unproven.
+LIVE, 2026-09-09, against /de/category/grills-116.html:
+
+    without --cdp-url   upstream 403, 13,922 bytes, 0 products  -> exit 3
+    with    --cdp-url   upstream 200, 1,693,678 bytes,          -> exit 0
+                        12 products, 12/12 confirmed against a
+                        rendered tile, EUR
+
+The Scraper API's own exit is a datacentre address and MediaMarkt refuses it,
+exactly as it refuses every other one. Routed through a residential browser
+session it returns the full page and this parser reads it as well as any
+browser engine does. So the flag is not optional here: --cdp-url is what
+makes this path work at all.
+
+Billed at $0.0005 per task at the observed rate, which makes it the cheapest
+way to read this site once a residential session is in the path.
 
 Listing pages only. `--mode product` lives in the browser engines.
 
@@ -87,7 +98,8 @@ from typing import Optional
 
 import requests
 
-from product_parser import parse_products, detect_bot_challenge, BOT_CHALLENGE_MARKERS
+from product_parser import (parse_products, detect_bot_challenge,
+                            detect_page_state, BOT_CHALLENGE_MARKERS)
 from output_writer import save
 import env_config
 
@@ -185,7 +197,14 @@ def fetch_html(args) -> str:
     html = body.get("body") or ""
     upstream_status = body.get("status")
     logger.info("Upstream page status %s, %d bytes of HTML.", upstream_status, len(html))
-    return html
+    # The STATUS is returned alongside the HTML, not thrown away. It used to
+    # be, and that cost this engine the family's central distinction: a 403
+    # from MediaMarkt carries the shop's own error page with no vendor marker
+    # on it, so the challenge check below finds nothing and the run fell
+    # through to "0 products" and exit 4. A pipeline branching on the exit
+    # code then reads a block as an empty category. See detect_page_state,
+    # which the three browser engines already reach through page_flow.
+    return html, upstream_status
 
 
 def main() -> int:
@@ -214,7 +233,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
         logger.info("Attempt %d/%d", attempt, attempts)
 
     try:
-        html = fetch_html(args)
+        html, upstream_status = fetch_html(args)
     except requests.RequestException as e:
         logger.error("Network error talking to the Scraper API: %s", e)
         return EXIT_API_ERROR
@@ -228,6 +247,22 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
         with open(args.dump_html, "w", encoding="utf-8") as f:
             f.write(html)
         logger.info("Raw HTML written to %s", args.dump_html)
+
+    # Same policy as the browser engines: the status decides the blocked
+    # case, because this site's refusal has no marker to detect.
+    state = detect_page_state(html, status=upstream_status, url=args.url)
+    if state == "blocked":
+        dump = f"{args.out}_scraperapi_debug.html"
+        with open(dump, "w", encoding="utf-8") as f:
+            f.write(html)
+        logger.error(
+            "MediaMarkt refused the Scraper API's request (upstream HTTP %s, "
+            "%d bytes) — saved to %s. Measured 2026-09-09: the Scraper API's "
+            "own exit is refused by this site, while the same task routed "
+            "through a residential browser session returns the full page. "
+            "Pass --cdp-url. This is exit 3, distinct from an empty result "
+            "(exit 4).", upstream_status, len(html), dump)
+        return 3
 
     vendor = detect_bot_challenge(html)
     if vendor:
@@ -260,8 +295,9 @@ def parse_args():
         description="MediaMarkt scraper — 2captcha Scraper API edition (no "
                     "local browser). These pages need no JavaScript, so this "
                     "path loses nothing — but the request still has to leave "
-                    "from a residential address. NOTE: untested against "
-                    "mediamarkt.de; see this file's docstring.")
+                    "from a residential address, and the Scraper API's own "
+                    "exit is refused by this site. Pass --cdp-url; see this "
+                    "file's docstring for the measured numbers.")
     # NOT required: prefer the TWOCAPTCHA_KEY env var. A key passed on the
     # command line is visible to anyone who can run `ps`, and it lands in
     # shell history and in any log that echoes the command line.
