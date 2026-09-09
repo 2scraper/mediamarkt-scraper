@@ -11,6 +11,50 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.6] — 2026-09-09
+
+The canary's first run with a real proxy secret crashed, and printed a live
+proxy login and password into its own CI log doing it. Three defects, all in
+`proxy_pool.py`, all triggered by one wrong value.
+
+### Fixed
+
+- **A malformed proxy URL crashed the run (exit 1) instead of being refused
+  (exit 2).** `parse_proxy_line` validated the scheme and the host but never
+  the port — and `urlparse` computes a port lazily, raising `ValueError` only
+  when something finally asks. So a bad entry sailed through validation and
+  blew up several calls later inside `to_playwright`, as an uncaught
+  traceback with no message saying what was wrong.
+  The value that caused it is the mistake a new user makes: a line from a
+  proxy LIST FILE (`scheme://host:port:login:password`) pasted where a proxy
+  URL (`http://login:password@host:port`) belongs. The refusal now says
+  exactly that.
+- **`mask()` raised on the values that most needed masking.** It read
+  `parsed.port`, so the one function standing between a password and a log
+  blew up on a malformed URL — and the caller printed the raw string
+  instead. That is how the credential reached the CI log. `mask()` is now
+  total: it never raises, and anything it cannot take apart is redacted whole
+  rather than echoed. Every `ProxyError` message now reports `mask(line)`.
+- **A pool of N identical entries claimed to be N exits.** A copied proxy
+  list is often one address repeated; the pool reported "exit 2/50" on every
+  rotation while every one of them left from the same place, and the
+  single-exit warning never fired because it counted entries. Duplicates are
+  now dropped, order preserved, and the collapse is logged rather than done
+  silently.
+
+### Removed
+
+- A test asserting that `"http://host:port:login:pass"` "is understood". It
+  checked only that `parse_proxy_line` did not reject the line — which it
+  did not, returning it unchanged — so the check passed while the value was
+  never usable. A test that asserts a function did not complain is not a test
+  that its answer was right. Replaced with one that pins the refusal, the
+  message, and the absence of the credential from it.
+
+`smoke_test.py`: 339 checks, up from 330.
+
+---
+
 ## [0.1.5] — 2026-09-09
 
 `--fingerprint` was applying almost none of the fingerprint. Found by reading
@@ -403,6 +447,7 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.6]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.6
 [0.1.5]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.5
 [0.1.4]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.4
 [0.1.3]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.3

@@ -5,7 +5,7 @@ A pytest entry point over the project's own offline suite.
 
 smoke_test.py (repo root) is deliberately a single self-contained runner with
 inline HTML/JSON fixtures, not a pytest suite — see CONTRIBUTING.md for why.
-This wraps it as one test rather than reimplementing its ~330 checks as pytest
+This wraps it as one test rather than reimplementing its ~339 checks as pytest
 asserts, so `pytest` and `python3 smoke_test.py` exercise the exact same code
 path instead of two suites that can silently drift apart. Run
 `python3 smoke_test.py` directly for per-check PASS/FAIL output; this test
