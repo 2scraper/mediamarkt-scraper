@@ -9,7 +9,7 @@
 [![needs a residential IP](https://img.shields.io/badge/needs-a%20residential%20IP-orange)](#the-one-thing-you-actually-need)
 
 Scrapes MediaMarkt category grids, search results and product pages across the
-group's eleven country sites. JSON or CSV, one row schema for both modes, and
+group's ten country sites. JSON or CSV, one row schema for both modes, and
 a run-metadata sidecar that says whether the result is complete.
 
 Three engines: **Playwright** (primary), **Selenium**, **pyppeteer**, or a
@@ -131,22 +131,35 @@ picked up (it prints no secrets).
 
 ### Country sites
 
-Eleven, and the list is not guessed: it is exactly what mediamarkt.de
-declares in its own `hreflang` set.
+Ten, and the list is not guessed: it is mediamarkt.de's own `hreflang` set,
+minus one site that turned out not to run on this platform at all.
 
-| Host | Locale | Currency |
-|---|---|---|
-| mediamarkt.de | de-DE | EUR |
-| mediamarkt.at | de-AT | EUR |
-| mediamarkt.ch | de-CH, fr-CH, it-CH | CHF |
-| mediamarkt.nl | nl-NL | EUR |
-| mediamarkt.be | nl-BE, fr-BE | EUR |
-| mediamarkt.lu | fr-LU | EUR |
-| mediamarkt.es | es-ES | EUR |
-| mediaworld.it | it-IT | EUR |
-| mediamarkt.pl | pl-PL | PLN |
-| mediamarkt.hu | hu-HU | HUF |
-| mediamarkt.com.tr | tr-TR | TRY |
+**All ten are live-verified.** Each was fetched on 2026-09-09 from a
+residential exit in its own country, and each returned a full page of twelve
+products with **every row confirmed against its rendered tile**:
+
+| Host | Locale | Currency | Live check |
+|---|---|---|---|
+| mediamarkt.de | de-DE | EUR | 12 rows, 12/12 confirmed |
+| mediamarkt.at | de-AT | EUR | 12 rows, 12/12 confirmed |
+| mediamarkt.ch | de-CH, fr-CH, it-CH | **CHF** | 12 rows, 12/12 confirmed |
+| mediamarkt.nl | nl-NL | EUR | 12 rows, 12/12 confirmed |
+| mediamarkt.be | nl-BE, fr-BE | EUR | 12 rows, 12/12 confirmed |
+| mediamarkt.es | es-ES | EUR | 12 rows, 12/12 confirmed |
+| mediaworld.it | it-IT | EUR | 12 rows, 12/12 confirmed |
+| mediamarkt.pl | pl-PL | **PLN** | 12 rows, 12/12 confirmed |
+| mediamarkt.hu | hu-HU | **HUF** | 12 rows, 12/12 confirmed |
+| mediamarkt.com.tr | tr-TR | **TRY** | 12 rows, 12/12 confirmed |
+
+**`mediamarkt.lu` is deliberately NOT supported**, and it is the interesting
+omission: it is a real MediaMarkt shop that does not run on this platform.
+Fetched from a Luxembourg exit it answers 200 with a full French storefront
+containing zero `/category/` paths, zero `/product/` paths, zero product
+cards, and JSON-LD carrying only `Organization` and `WebSite` — it is a
+Shopify store. Every selector here would find nothing, so the host is refused
+**with that reason** rather than returning an empty category. Saturn
+(saturn.de, saturn.at) is refused the same way, as an unverified sibling
+brand.
 
 There is no `--country` flag: the hostname in `--url` decides, so a flag and
 a URL cannot disagree about which shop a run is reading. A host outside this
@@ -155,28 +168,16 @@ article-number pattern and the pagination convention are all MediaMarkt's,
 and pointing them at another shop would not fail loudly, it would return zero
 rows and read as an empty category.
 
-**Three sites are live-verified: `.de`, `.es` and `.pl`.** All three
-returned 12 products a page with 100% of rows confirmed against a rendered
-tile, in EUR, EUR and PLN respectively — so the parser handles a second
-language and a non-euro currency without a special case. The remaining eight
-share the platform and the markup and are expected to work, but "expected" is
-not "measured" and this README does not promise what was not run.
+**Use an exit in the site's own country.** That is measured, not assumed. A
+single German residential address was accepted by `.de`, `.es` and `.pl` and
+**refused with 403 by the other seven** — while each of those seven answered
+normally from an exit in its own country. So a residential IP is necessary
+and not sufficient: the country has to match, or at least be one the site
+accepts.
 
-**Which exits a site accepts is not uniform, and this is the practical
-catch.** From one German residential address on 2026-09-09:
-
-| Accepted (HTTP 200) | Refused (HTTP 403) |
-|---|---|
-| mediamarkt.de, mediamarkt.es, mediamarkt.pl | mediamarkt.at, mediamarkt.nl, mediamarkt.be, mediamarkt.ch, mediamarkt.lu, mediaworld.it, mediamarkt.com.tr, mediamarkt.hu |
-
-So a residential exit is necessary but not always sufficient: the safe
-assumption is that you need an exit the target site accepts, and an exit in
-that country is the obvious candidate. That was not tested for the eight
-above, so it is stated as an assumption rather than as a result.
-
-Saturn (saturn.de, saturn.at) is a sibling brand on similar markup that is
-deliberately **not** in the list, because it is not in MediaMarkt's hreflang
-set and has not been checked.
+With a 2Captcha proxy that is a one-word change (`-region-de` to `-region-it`
+and so on); with the Scraping Browser API it is the `country-` segment of the
+endpoint.
 
 ---
 
@@ -398,15 +399,16 @@ More in [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 ## Measurements in this README
 
 Everything above was measured rather than estimated. The numbers come from
-live runs on **2026-09-09** from a German residential exit against
-`mediamarkt.de`, `mediamarkt.es` and `mediamarkt.pl`, and from twenty-odd
-page captures taken the same day. The offline suite pins the field values
-from those captures — including a Polish listing, which is a second language,
-a non-euro currency and one of the two hosts that answer without a `www.`
-prefix — so a change in the site's markup fails a test rather than quietly
-emptying a column.
+live runs on **2026-09-09** against all ten country sites, each from a
+residential exit in its own country, plus page captures taken the same day.
+The offline suite pins the field values from those captures — including a
+Polish listing (a second language, a non-euro currency, and the host that
+answers without a `www.` prefix) and a Turkish tile (a prefixed currency, a
+percent sign written before its number, and an instalment line in the same
+price block) — so a change in the site's markup fails a test rather than
+quietly emptying a column.
 
-`smoke_test.py`: **269 checks**, no network, no browser, no credentials.
+`smoke_test.py`: **284 checks**, no network, no browser, no credentials.
 
 ---
 

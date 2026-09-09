@@ -113,6 +113,17 @@ logger = logging.getLogger(__name__)
 # brand on similar markup but is NOT in mediamarkt.de's hreflang set and has
 # not been verified here, so it is deliberately absent rather than assumed.
 #
+# `mediamarkt.lu` IS in that hreflang set and is still absent, which is the
+# more interesting omission: it is a real MediaMarkt shop that does not run
+# on this platform at all. Fetched from a Luxembourg exit on 2026-09-09 it
+# answered 200 with a full French storefront and, in it, zero `/category/`
+# paths, zero `/product/` paths, zero `mms-product-card` elements, and
+# JSON-LD carrying only `Organization` and `WebSite` — no ItemList, no
+# Product. It is a Shopify store. Every selector, URL pattern and pagination
+# convention in this file would find nothing there, and a run would report
+# an empty category rather than an unsupported site. Refusing the host says
+# so instead.
+#
 # The currency is a FALLBACK only. Every structured price on this site names
 # its own currency in `offers.priceCurrency`, and that always wins. This table
 # is consulted when a DOM-only read produced a bare symbol.
@@ -123,12 +134,38 @@ HOSTS: Dict[str, str] = {
     "mediaworld.it": "EUR",
     "mediamarkt.nl": "EUR",
     "mediamarkt.be": "EUR",
-    "mediamarkt.lu": "EUR",
     "mediamarkt.pl": "PLN",
     "mediamarkt.ch": "CHF",
     "mediamarkt.com.tr": "TRY",
     "mediamarkt.hu": "HUF",
 }
+
+
+# Hosts that ARE MediaMarkt and are still not supported, with the reason. A
+# caller pointing at one of these deserves to be told what is actually wrong
+# rather than "not a MediaMarkt site", which is false and sends them looking
+# for a typo.
+UNSUPPORTED: Dict[str, str] = {
+    "mediamarkt.lu": (
+        "runs on Shopify, not the MediaMarkt Saturn platform this scraper "
+        "reads. Checked from a Luxembourg exit on 2026-09-09: no /category/ "
+        "or /product/ paths, no product cards, and JSON-LD carrying only "
+        "Organization and WebSite. Nothing here would match it"
+    ),
+    "saturn.de": (
+        "is the sibling Saturn brand. Similar markup, but not in "
+        "MediaMarkt's own hreflang set and not verified here"
+    ),
+    "saturn.at": (
+        "is the sibling Saturn brand. Similar markup, but not in "
+        "MediaMarkt's own hreflang set and not verified here"
+    ),
+}
+
+
+def unsupported_reason(url: str) -> Optional[str]:
+    """Why this host is refused, when the answer is more than "not ours"."""
+    return UNSUPPORTED.get(site_host(url))
 
 
 def site_host(url: str) -> str:
@@ -244,6 +281,25 @@ _PRICE_RE = re.compile(
 # cents placeholder, so a range or a hyphenated model number cannot merge.
 _DASH_DECIMAL_RE = re.compile(r"(\d),[–—-](?!\d)")
 
+# A discount badge is not a price, and removing it BEFORE matching is the
+# only way to be sure of that. Rejecting the match afterwards is not enough:
+# a rejected match has still consumed its text, and on a Turkish tile it
+# consumes the currency symbol belonging to the price that follows.
+#
+#     -%10,34 ₺25.999,–
+#
+# Turkish puts the percent sign BEFORE its number and the currency symbol
+# before its own, so the suffix form of the price pattern reads "10,34 ₺"
+# out of that — the badge's number wearing the next price's symbol — and a
+# 25,999 TRY air conditioner was parsed as costing 10.34. Skipping that match
+# then swallowed the "₺" and lost the real price too. Stripping the badge
+# first leaves the price untouched.
+#
+# Both orders are handled because locales disagree about which side the sign
+# goes: German writes "-16%", Turkish writes "-%10,34".
+_PERCENTAGE_RE = re.compile(
+    r"[-+\u2212]?\s*(?:%\s*\d[\d.,]*|\d[\d.,]*\s*%)")
+
 # The article number, recovered from the product URL. MediaMarkt's slugs are
 # full of other numbers — model designations, capacities, dimensions
 # ("_koenic-kfk-631-1-c-in-...-c-149-kwh-1850-mm-hoch-inox-2882323.html") —
@@ -293,7 +349,9 @@ def _prices_in(text: str, host_cur: Optional[str] = None
     code.
     """
     amounts, currency = [], None
-    for m in _PRICE_RE.finditer(_DASH_DECIMAL_RE.sub(r"\1,00", text)):
+    prepared = _PERCENTAGE_RE.sub(" ", text)
+    prepared = _DASH_DECIMAL_RE.sub(r"\1,00", prepared)
+    for m in _PRICE_RE.finditer(prepared):
         sym = m.group(1) or m.group(4)
         code = m.group(5) or m.group(8)
         if code and code not in _CURRENCY_CODES:
@@ -566,8 +624,9 @@ def _absolute_url(base_url: str, href: str) -> str:
 
     Resolved against the PAGE's own URL rather than rebuilt from the bare
     hostname, because the two are not interchangeable across this group.
-    Nine of the eleven country sites answer on `www.`; `mediamarkt.pl` and
-    `mediamarkt.lu` do not, and their own hreflang entries say so.
+    Nine of the ten supported country sites answer on `www.`; `mediamarkt.pl`
+    does not, and its own hreflang entry says so. (`mediamarkt.lu` is the
+    same shape and is not supported at all — see UNSUPPORTED.)
 
     A version of this function prepended "www." unconditionally, and
     everything still looked healthy — rows, titles, prices all come from the

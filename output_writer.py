@@ -64,9 +64,10 @@ class Product:
     brand: Optional[str] = None
     price: Optional[float] = None
     # No guessed default: a row whose currency could not be established says
-    # None rather than claiming EUR. Six of the eleven country sites are not
-    # in the euro zone (PLN, CHF, TRY, HUF, and Switzerland prints "CHF"),
-    # so a defaulted "EUR" would be wrong for a fifth of the platform.
+    # None rather than claiming EUR. Four of the ten country sites quote
+    # something else — PLN, CHF, HUF and TRY, all four confirmed on live
+    # pages — so a defaulted "EUR" would be wrong on two fifths of the
+    # platform.
     currency: Optional[str] = None
     # The manufacturer's recommended price (UVP / PVPR / adviesprijs), read
     # from the tile's `mms-strike-price-type-rrp` node. See the WARNING in
@@ -254,7 +255,7 @@ def run_meta(status: str, stop_reason: str, pages_requested: int,
 
     `mode` and `source` are recorded because neither is implied by the repo:
     the same output prefix can hold a listing run or a product run, from any
-    of eleven country sites in four currencies, and a consumer that guesses
+    of ten country sites in five currencies, and a consumer that guesses
     wrong compares prices that were never comparable. diff_runs.py refuses a
     pair whose modes or sources differ.
 
