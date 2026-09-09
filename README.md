@@ -408,7 +408,7 @@ percent sign written before its number, and an instalment line in the same
 price block) — so a change in the site's markup fails a test rather than
 quietly emptying a column.
 
-`smoke_test.py`: **284 checks**, no network, no browser, no credentials.
+`smoke_test.py`: **301 checks**, no network, no browser, no credentials.
 
 ---
 

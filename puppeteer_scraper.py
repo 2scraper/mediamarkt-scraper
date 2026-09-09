@@ -466,7 +466,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             time.sleep(1)
 
         html = _content(session) or ""
-        state = detect_page_state(html, url=page.url)
+        state = page_flow.classify(html, url=page.url)
 
 
         if not page_flow.should_retry(state):

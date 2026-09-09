@@ -5,7 +5,7 @@
 #   docker build -t mediamarkt-scraper .
 #   docker run --rm -v "$PWD/out:/out" mediamarkt-scraper \
 #     --url "https://www.mediamarkt.de/de/category/grills-116.html" \
-#     --pages 3 --out /out/headphones
+#     --pages 3 --out /out/grills
 #
 # Pass --proxy/--twocaptcha-key the same way as running locally, or mount a
 # .env at /app/.env — nothing here bakes in a credential.
@@ -19,8 +19,15 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-playwright.tx
     # not pip packages, so this has to run as a separate, explicit step.
     && playwright install --with-deps chromium
 
+# Every module playwright_scraper.py imports, transitively, plus diff_runs.py
+# as a useful companion in the same image. smoke_test.py checks this list
+# against the entrypoint's real import graph: an earlier version omitted
+# proxy_pool.py, which the engine imports at module level, so the image died
+# with ModuleNotFoundError on every invocation INCLUDING `--help` — a broken
+# container that nothing in the repo would have noticed.
 COPY captcha_solver.py env_config.py fingerprint_client.py output_writer.py \
-     page_flow.py playwright_scraper.py product_parser.py diff_runs.py ./
+     page_flow.py playwright_scraper.py product_parser.py proxy_pool.py \
+     diff_runs.py ./
 
 ENTRYPOINT ["python3", "playwright_scraper.py"]
 CMD ["--help"]

@@ -42,6 +42,7 @@ Exits non-zero on any failure.
 """
 
 import ast
+import builtins
 import inspect
 import json
 import os
@@ -1559,6 +1560,138 @@ def test_wording():
     return ok
 
 
+# Names Python provides that are not imports and not assignments.
+_MODULE_DUNDERS = {"__file__", "__name__", "__doc__", "__package__",
+                   "__spec__", "__loader__", "__builtins__", "__debug__"}
+
+
+def _undefined_names(path):
+    """Names loaded in `path` that are never imported, defined or assigned.
+
+    A deliberately coarse approximation — it pools every binding in the file
+    rather than tracking scopes, so it under-reports and never invents a
+    problem. That is the right trade here: this exists to catch a name that
+    is nowhere at all, and a false positive would be worse than a miss.
+    """
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    bound = set(dir(builtins)) | _MODULE_DUNDERS
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            bound |= {(a.asname or a.name.split(".")[0]) for a in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            bound |= {(a.asname or a.name) for a in node.names}
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                               ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.Global):
+            bound |= set(node.names)
+    missing = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) \
+                and node.id not in bound:
+            missing.setdefault(node.id, []).append(node.lineno)
+    return missing
+
+
+def test_no_undefined_names():
+    group("no engine references a name that does not exist")
+    ok = True
+    # This exists because of a bug that got all the way to a live run.
+    # puppeteer_scraper.py called `detect_page_state(...)` on a line reached
+    # only while fetching a page, after the import of that name had been
+    # removed. The module imported fine, `--help` worked, `compileall`
+    # passed, the whole offline suite passed and CI was green — and the
+    # engine died with NameError on its first real page.
+    #
+    # Byte-compiling proves a file PARSES. It says nothing about whether the
+    # names in it resolve, and the paths where they do not are exactly the
+    # ones an offline suite cannot execute.
+    for name in sorted(f for f in os.listdir(REPO_ROOT) if f.endswith(".py")):
+        missing = _undefined_names(os.path.join(REPO_ROOT, name))
+        detail = ", ".join("%s (line %d)" % (k, v[0])
+                           for k, v in sorted(missing.items()))
+        ok &= check("%s references no undefined name%s"
+                    % (name, ": " + detail if missing else ""), not missing)
+    return ok
+
+
+def test_dockerfile_copies_what_it_runs():
+    group("the Docker image contains every module its entrypoint imports")
+    ok = True
+    path = os.path.join(REPO_ROOT, "Dockerfile")
+    if not os.path.exists(path):
+        return check("Dockerfile exists", False)
+
+    # The Dockerfile COPYs an explicit list rather than the whole directory,
+    # which is right — the image should not carry the test suite, the
+    # fixtures or a stray .env. The cost is that the list can fall behind the
+    # imports, and NOTHING else in this repo would notice: CI never builds
+    # the image, so a missing module ships and the container dies with
+    # ModuleNotFoundError on every invocation, `--help` included.
+    #
+    # That is not hypothetical. `proxy_pool.py` was missing from this list,
+    # and playwright_scraper.py imports it at module level.
+    raw = open(path, encoding="utf-8").read()
+    joined = re.sub(r"\\\n\s*", " ", raw)          # fold line continuations
+    copied = set()
+    for line in joined.splitlines():
+        if line.startswith("COPY "):
+            copied.update(tok for tok in line.split() if tok.endswith(".py"))
+
+    entrypoint = None
+    m = re.search(r'ENTRYPOINT\s*\[([^\]]*)\]', joined)
+    if m:
+        parts = [x.strip().strip('"\'') for x in m.group(1).split(",")]
+        entrypoint = next((x for x in parts if x.endswith(".py")), None)
+    ok &= check("the Dockerfile names a Python entrypoint", bool(entrypoint))
+    if not entrypoint:
+        return False
+    ok &= check("the entrypoint itself is copied into the image",
+                entrypoint in copied)
+
+    # Every LOCAL module the entrypoint reaches, transitively.
+    local = {f[:-3] for f in os.listdir(REPO_ROOT) if f.endswith(".py")}
+
+    def reached(module, seen=None):
+        seen = seen if seen is not None else set()
+        if module in seen:
+            return seen
+        seen.add(module)
+        tree = ast.parse(open(os.path.join(REPO_ROOT, module + ".py"),
+                              encoding="utf-8").read())
+        for node in ast.walk(tree):
+            names = []
+            if isinstance(node, ast.Import):
+                names = [a.name.split(".")[0] for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                names = [node.module.split(".")[0]]
+            for name in names:
+                if name in local:
+                    reached(name, seen)
+        return seen
+
+    needed = reached(entrypoint[:-3])
+    missing = sorted(m + ".py" for m in needed if (m + ".py") not in copied)
+    ok &= check("every module the entrypoint imports is COPYed (%s)"
+                % (", ".join(missing) if missing else "none missing"),
+                not missing)
+
+    # The other direction is a warning, not a failure: diff_runs.py is copied
+    # deliberately as a companion tool even though the engine never imports
+    # it. But anything copied must at least still EXIST.
+    gone = sorted(f for f in copied
+                  if not os.path.exists(os.path.join(REPO_ROOT, f)))
+    ok &= check("the Dockerfile copies no file that has been deleted (%s)"
+                % (", ".join(gone) if gone else "none"), not gone)
+    return ok
+
+
 def test_sample_output():
     group("sample_output is cut from a real run")
     ok = True
@@ -1624,6 +1757,8 @@ def main() -> int:
     ok &= test_engines(skips)
     ok &= test_no_capture_leaks()
     ok &= test_wording()
+    ok &= test_no_undefined_names()
+    ok &= test_dockerfile_copies_what_it_runs()
     ok &= test_sample_output()
 
     print()
