@@ -2066,6 +2066,42 @@ def test_sample_output():
 
 
 # ---------------------------------------------------------------------------
+def test_ci_checks_is_actually_wired_up():
+    group("the shipped CI checks run, and pass on this repo")
+    ok = True
+    # `.github/ci_checks.py` was in this repo and invoked by NOTHING — not
+    # CI, not this suite — while `tests.yml` carried an inline grep doing a
+    # narrower version of the same job with its own allowlist. The inline one
+    # matched only ws:// and wss://, so an `http://user:pass@` credential
+    # would have sailed past CI; the shipped one, which does match http://,
+    # meanwhile failed on this repo's own main because its allowlist was
+    # missing four legitimate documentation placeholders.
+    #
+    # Two sources of truth, one dead and one with a hole. Running the shipped
+    # one here as well means a failure shows up locally, before a push,
+    # rather than in a log nobody reads.
+    script = os.path.join(REPO_ROOT, ".github", "ci_checks.py")
+    ok &= check("ci_checks.py is present", os.path.exists(script))
+    if not os.path.exists(script):
+        return False
+    proc = subprocess.run([sys.executable, script, "--all"],
+                          cwd=REPO_ROOT, capture_output=True, text=True)
+    ok &= check("ci_checks.py --all passes on this repo (exit %d)"
+                % proc.returncode, proc.returncode == 0)
+    if proc.returncode != 0:
+        for line in (proc.stdout + proc.stderr).strip().split("\n")[-12:]:
+            print("        %s" % line)
+    # ...and the workflow calls it rather than reimplementing it.
+    wf = open(os.path.join(REPO_ROOT, ".github", "workflows", "tests.yml"),
+              encoding="utf-8").read()
+    ok &= check("tests.yml runs the shipped check rather than an inline copy",
+                "ci_checks.py --secret-check" in wf
+                or "ci_checks.py --all" in wf)
+    ok &= check("...and carries no second, narrower inline credential grep",
+                "(ws|wss)://[^ " not in wf)
+    return ok
+
+
 def main() -> int:
     ok = True
     # Checks that could not run because an optional engine library is absent.
@@ -2094,6 +2130,7 @@ def main() -> int:
     ok &= test_proxy_pool()
     ok &= test_engines(skips)
     ok &= test_no_capture_leaks()
+    ok &= test_ci_checks_is_actually_wired_up()
     ok &= test_wording()
     ok &= test_fingerprint_application()
     ok &= test_credentials_never_reach_a_log()
