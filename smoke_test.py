@@ -50,7 +50,9 @@ import re
 import subprocess
 import sys
 import threading
+import io
 import tempfile
+from contextlib import redirect_stdout
 from dataclasses import fields
 
 from captcha_solver import (detect_recaptcha_v3, detect_recaptcha_in_page,
@@ -1259,6 +1261,30 @@ def test_captcha():
     return ok
 
 
+def _placeholder_reads_unset(raw):
+    """Whether env_config would treat `raw` as "not configured".
+
+    Goes through the real rule — `env_config.env_value`, which is where the
+    placeholder logic lives — rather than reimplementing it, because a
+    reimplementation is what drifts. The variable is set in os.environ
+    directly and restored afterwards: `load_env` only fills variables that
+    are not already set, so writing a temporary .env would be shadowed by
+    whatever the suite has already loaded.
+    """
+    name = "MEDIAMARKT_CDP_ENDPOINT"
+    saved = os.environ.get(name)
+    try:
+        os.environ[name] = raw
+        with io.StringIO() as buf, redirect_stdout(buf):
+            value = env_config.env_value(name)
+    finally:
+        if saved is None:
+            os.environ.pop(name, None)
+        else:
+            os.environ[name] = saved
+    return value is None
+
+
 def test_env_config():
     group("env_config")
     ok = True
@@ -1266,6 +1292,49 @@ def test_env_config():
                 set(env_config.ENV_KEYS) ==
                 {"TWOCAPTCHA_KEY", "MEDIAMARKT_CDP_ENDPOINT",
                  "MEDIAMARKT_PROXY", "MEDIAMARKT_URL"})
+
+    # A COPIED .env.example MUST READ AS UNSET, and a literal-only check is
+    # not enough to make that true. This repo documents its two credentialled
+    # URLs the way the vendor does, with the parts you fill in in braces:
+    #
+    #     ws://{login}-zone-scraping_browser-…-pid-{profileId}:{password}@…
+    #     http://{user}:{password}@eu.proxy.2captcha.com:2334
+    #
+    # Before the brace check existed the loader reported both of those as
+    # CONFIGURED, so `cp .env.example .env` and a run connected to
+    # cb.2captcha.com with the string `{login}-zone-…` as its username and
+    # got a 401 — a confusing failure a long way from its cause.
+    for raw in ('ws://{login}-zone-scraping_browser-country-de-pid-'
+                '{profileId}:{password}@cb.2captcha.com:9222',
+                'http://{user}:{password}@eu.proxy.2captcha.com:2334',
+                'your_2captcha_api_key_here'):
+        ok &= check("a placeholder value reads as unset: %s..." % raw[:34],
+                    _placeholder_reads_unset(raw))
+    # ...and a REAL value still reads as set, or the guard has eaten the
+    # feature it was protecting.
+    ok &= check("a real value is not mistaken for a placeholder",
+                _placeholder_reads_unset(
+                    "ws://acct1-zone-scraping_browser-country-de-pid-p1:"
+                    "secret@cb.2captcha.com:9222") is False)
+
+    # `--fp-tags` MUST DEFAULT TO ONE OS-FAMILY TAG. It shipped as
+    # "Windows,Chrome,Desktop", which the fingerprint API rejects with HTTP
+    # 400 — so --fingerprint failed on every invocation, while
+    # fingerprint_client.py's own --tags help said ONE tag all along.
+    # Measured against the live API on 2026-09-10: `Windows` succeeds, and
+    # `Windows,Chrome,Desktop`, `Chrome` and `Desktop` each 400.
+    for f in ENGINE_FILES:
+        path = os.path.join(REPO_ROOT, f)
+        if not os.path.exists(path):
+            continue
+        m = re.search(r'--fp-tags"\s*,\s*default="([^"]*)"',
+                      open(path, encoding="utf-8").read())
+        if m is None:
+            continue
+        ok &= check("%s's --fp-tags default is ONE tag the API accepts" % f,
+                    "," not in m.group(1)
+                    and m.group(1) in ("Windows", "Microsoft Windows",
+                                       "Android"))
 
     # .env.example must document exactly the variables the code reads, in
     # both directions. It drifts otherwise, and a documented-but-unread
