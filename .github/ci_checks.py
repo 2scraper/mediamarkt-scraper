@@ -52,8 +52,25 @@ FABRICATION_MARKERS = ("sample-product-", "example brand", "sample product",
 CREDENTIALLED_URL = re.compile(r"(?:ws|wss|https?)://[^\s\"'/]+:[^\s\"'/]+@")
 
 # Documented placeholders, which are supposed to look like the real thing.
+# Documented placeholders and test values, which are SUPPOSED to look like the
+# real thing — that is the point of them. Each entry earns its place by being
+# in a line whose job is to show the shape of a credential or to prove the
+# masker removes one; a real secret matches none of these.
+#
+# Kept as an explicit list rather than a loose pattern so that adding one is a
+# decision. The alternative — a regex broad enough to cover them all — would
+# also cover a real login.
+#
+# The last four were missing, which is why `--all` failed on this repo's own
+# main: this file matches `http://` as well as `ws://`, and the repo's
+# documentation and masking fixtures use `http://` placeholders. A check that
+# fails on its own repository is a check nobody can read.
 CREDENTIAL_ALLOWED = ("USER:PASS", "user:pass", "ACCOUNT:PASSWORD", "{login}",
-                      "***", "password}@", "u:p@h", "LOGIN:PASSWORD")
+                      "{user}", "***", "password}@", "u:p@h", "LOGIN:PASSWORD",
+                      "user:secret@",                  # the masking fixtures
+                      "login:password@host:port",      # a refusal message
+                      "u:supersecret@", "login:supersecret@",
+                      "u:pass@h1", "u:pass@h2")
 
 # A 2captcha API key is a 32-character hex string.
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")

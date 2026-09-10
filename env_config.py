@@ -28,6 +28,7 @@ scripts behave exactly as before.
 
 import logging
 import os
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,22 @@ _PLACEHOLDERS = {
     "changeme",
     "",
 }
+
+# ...and the SHAPE of a placeholder, which a literal set cannot cover.
+#
+# `.env.example` documents the two credentialled URLs the way the vendor
+# documents them, with the parts you fill in written in braces:
+#
+#     ws://{login}-zone-scraping_browser-country-de-pid-{profileId}:{password}@…
+#     http://{user}:{password}@eu.proxy.2captcha.com:2334
+#
+# A literal-only check reported both of those as CONFIGURED, so `cp
+# .env.example .env` followed by a run connected to cb.2captcha.com with the
+# string `{login}-zone-…` as its username and got a 401 — a confusing failure
+# a long way from its cause, which is precisely what the credential rule
+# exists to prevent. Any `{…}` left in a value means the line was never
+# filled in.
+_BRACED_PLACEHOLDER_RE = re.compile(r"\{[A-Za-z_][A-Za-z0-9_]*\}")
 
 _loaded_from = None
 
@@ -158,6 +175,17 @@ def env_value(name):
         logger.warning(
             "%s is still set to the placeholder from .env.example — treating it "
             "as unset. Put your real value in .env.", name)
+        return None
+    placeholder = _BRACED_PLACEHOLDER_RE.search(stripped)
+    if placeholder:
+        # Named, not quoted whole: the value can be a credentialled URL, and
+        # printing it would put a real password in a log the moment someone's
+        # password happens to contain a brace.
+        logger.warning(
+            "%s still contains the placeholder %s from .env.example — treating "
+            "it as unset. Fill in the real value in .env; a placeholder sent "
+            "to the API produces a 401 a long way from its cause.",
+            name, placeholder.group(0))
         return None
     return stripped
 
