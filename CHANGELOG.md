@@ -11,6 +11,34 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ---
 
+## [0.1.8] — 2026-09-11
+
+### Fixed
+
+- **`fingerprint_client.py` could not read the key from `.env`.** `--key`
+  defaulted to `os.environ.get("TWOCAPTCHA_KEY")` and only that, so a key put
+  in `.env` — exactly as §3, the README and `.env.example` instruct — worked
+  for every engine and failed HERE with "No API key". A documented mechanism
+  not applied on one path, which is the shape of half the defects §16 lists.
+
+  It now reads through `env_config.env_value`, calling `load_env()` itself
+  because this is a standalone entry point that no engine has necessarily run
+  first. Going through the loader rather than `os.environ` is measured rather
+  than stylistic: with `TWOCAPTCHA_KEY=your_2captcha_api_key_here` exported,
+  the old path sent the placeholder to the API and reported "Fingerprint API
+  rejected the key (401) — note this is a separate subscription", sending the
+  reader off to check a subscription they never needed; the loader says
+  "still set to the placeholder from .env.example" instead.
+
+  Found on a sibling repo's first live `--fingerprint` run, then checked
+  across the family before patching, per §16: five repos had it and one had
+  already fixed it. Pinned by a check verified to fail on the old code —
+  including that the help string does not interpolate its default, which is
+  one substring away from printing a live credential to anyone who types
+  `--help`.
+
+---
+
 ## [0.1.7] — 2026-09-11
 
 ### Fixed
@@ -468,6 +496,7 @@ run surfaced it.
   claimed MIT. The repo is MIT, matching the rest of this family, and the
   README and the licence now agree.
 
+[0.1.8]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.8
 [0.1.7]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.7
 [0.1.6]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.6
 [0.1.5]: https://github.com/2scraper/mediamarkt-scraper/releases/tag/v0.1.5
