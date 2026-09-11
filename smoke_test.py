@@ -1790,6 +1790,13 @@ def test_fingerprint_application():
                 kw.get("locale") == "de-DE")
     ok &= check("the timezone is carried, so the browser cannot contradict it",
                 kw.get("timezone_id") == "Europe/Berlin")
+    # The device pixel ratio, which Playwright takes as its own option and
+    # which was dropped on the floor until a live browser was compared
+    # against the fingerprint: one stating 1.25 produced a browser reporting
+    # `devicePixelRatio === 1`, so the identity contradicted itself on an
+    # axis a fingerprinter reads for free.
+    ok &= check("fingerprint: the device scale factor is carried",
+                kw.get("device_scale_factor") == 1)
     # A viewport exactly equal to the screen is itself a signal, and the
     # fingerprint states its own window size rather than needing one guessed.
     ok &= check("the viewport is the fingerprint's window, not its screen",
