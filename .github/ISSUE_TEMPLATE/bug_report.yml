@@ -93,7 +93,7 @@ body:
     attributes:
       label: What you expected instead
       placeholder: >-
-        96 products, as the README says a category page yields.
+        12 rows, 12/12 confirmed, as the README's per-site table shows for mediamarkt.de.
     validations:
       required: true
 

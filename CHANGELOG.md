@@ -13,6 +13,19 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Fixed
+
+- **farfetch-scraper leftovers removed from the bug template, SECURITY and
+  `diff_runs.py`.** The bug-report template expected Farfetch's "96
+  products, as the README says a category page yields"; it now quotes this
+  README's per-site table. `diff_runs.py` explained `source_changed` as
+  "the DOM-corrected figure versus the raw JSON-LD one" — Farfetch's price
+  overlay, which this repo does not have — and its examples used
+  `girls_clothing`; it now describes `jsonld+dom` / `jsonld` / `dom` and uses
+  `grills`. `SECURITY.md` named Akamai, while MediaMarkt's refusal is its own
+  branded page with no vendor marker. CONTRIBUTING's "the registration form"
+  is generalised.
+
 ### Added
 
 - **A check that binds every call into a shared module against the callee's
