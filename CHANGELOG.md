@@ -13,6 +13,19 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Fixed
+
+- **farfetch-scraper leftovers removed from the bug template, SECURITY and
+  `diff_runs.py`.** The bug-report template expected Farfetch's "96
+  products, as the README says a category page yields"; it now quotes this
+  README's per-site table. `diff_runs.py` explained `source_changed` as
+  "the DOM-corrected figure versus the raw JSON-LD one" — Farfetch's price
+  overlay, which this repo does not have — and its examples used
+  `girls_clothing`; it now describes `jsonld+dom` / `jsonld` / `dom` and uses
+  `grills`. `SECURITY.md` named Akamai, while MediaMarkt's refusal is its own
+  branded page with no vendor marker. CONTRIBUTING's "the registration form"
+  is generalised.
+
 ### Added
 
 - **A check that binds every call into a shared module against the callee's
@@ -37,6 +50,9 @@ with it, so nobody discovers it from a bill or from a diff.
   no edit here, and the path goes through `GITHUB_ENV` because
   `${{ env.HOME }}` is empty in the workflow `env` context — the expression
   form makes the action fall back to `latest` silently.
+
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
 
 ## [0.1.8] — 2026-09-11
 
