@@ -51,6 +51,9 @@ with it, so nobody discovers it from a bill or from a diff.
   `${{ env.HOME }}` is empty in the workflow `env` context — the expression
   form makes the action fall back to `latest` silently.
 
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+
 ## [0.1.8] — 2026-09-11
 
 ### Fixed
