@@ -13,6 +13,36 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Fixed
+
+- **farfetch-scraper leftovers removed from the bug template, SECURITY and
+  `diff_runs.py`.** The bug-report template expected Farfetch's "96
+  products, as the README says a category page yields"; it now quotes this
+  README's per-site table. `diff_runs.py` explained `source_changed` as
+  "the DOM-corrected figure versus the raw JSON-LD one" — Farfetch's price
+  overlay, which this repo does not have — and its examples used
+  `girls_clothing`; it now describes `jsonld+dom` / `jsonld` / `dom` and uses
+  `grills`. `SECURITY.md` named Akamai, while MediaMarkt's refusal is its own
+  branded page with no vendor marker. CONTRIBUTING's "the registration form"
+  is generalised.
+
+- **The Scraper API path sent `waitFor` in a form the live API rejects,
+  and read the wrong field as the target's status.** Measured 2026-09-23
+  against `scraper.2captcha.com/tasks/sync`: `waitFor` sent as a
+  JSON-encoded string (what this client built for every `--wait-*` flag)
+  is answered HTTP 422 "params.waitFor must be an object" and is still
+  billed ($0.0005); the same request with an object gets HTTP 200. It is
+  now an object. And the response's `status` is the API's own verdict
+  ("success"), not the target site's HTTP code, which is `http_code` —
+  so a target 403 or 503 never reached the page classifier. The target
+  status is now read from `http_code` (falling back to `status` only if
+  that is an integer). Pinned by an offline check that drives the real
+  client with `requests.post` stubbed; verified by control (red with the
+  old client).
+
+- `SECURITY.md` said this project has no releases or version tags; it has
+  both. "Supported versions" now names the latest release and `main`.
+
 ### Added
 
 - **A check that binds every call into a shared module against the callee's
@@ -37,23 +67,6 @@ with it, so nobody discovers it from a bill or from a diff.
   no edit here, and the path goes through `GITHUB_ENV` because
   `${{ env.HOME }}` is empty in the workflow `env` context — the expression
   form makes the action fall back to `latest` silently.
-
-### Fixed
-
-- **The Scraper API path sent `waitFor` in a form the live API rejects,
-  and read the wrong field as the target's status.** Measured 2026-09-23
-  against `scraper.2captcha.com/tasks/sync`: `waitFor` sent as a
-  JSON-encoded string (what this client built for every `--wait-*` flag)
-  is answered HTTP 422 "params.waitFor must be an object" and is still
-  billed ($0.0005); the same request with an object gets HTTP 200. It is
-  now an object. And the response's `status` is the API's own verdict
-  ("success"), not the target site's HTTP code, which is `http_code` —
-  so a target 403 or 503 never reached the page classifier. The target
-  status is now read from `http_code` (falling back to `status` only if
-  that is an integer). Pinned by an offline check that drives the real
-  client with `requests.post` stubbed; verified by control (red with the
-  old client).
-
 
 ## [0.1.8] — 2026-09-11
 
