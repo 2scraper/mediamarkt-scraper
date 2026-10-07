@@ -140,6 +140,15 @@ def classify(html: Optional[str], status: Optional[int] = None,
     return detect_page_state(html or "", status=status, url=url)
 
 
+# Appended to the "refused" log line by every engine. A refusal body is identical
+# for a datacentre address and for a residential one in the wrong country, so
+# the response cannot tell the two apart — the README measured one German
+# residential address accepted by .de/.es/.pl and refused by the other seven.
+BLOCK_COUNTRY_HINT = (" If the exit is already residential, its COUNTRY must be "
+                      "the site's own: a German address is accepted by .de, .es "
+                      "and .pl and refused by the other seven (see README).")
+
+
 # What each state means for the run. Kept as data rather than as three copies
 # of an if-chain, so an engine cannot quietly disagree with its twins about
 # whether a page is worth retrying or worth paying for.

@@ -91,6 +91,22 @@ with it, so nobody discovers it from a bill or from a diff.
   one and calls the validator, so a new engine declaring the flag with a
   plain int fails the suite.
 
+- **The canary's exit-code switch had no branch for exit 5.** Exit 5 (the
+  page was never obtained: a dead or expired proxy, a timeout) has been a
+  defined code since it was unified family-wide, so a browser run that got
+  past the proxy preflight and still never obtained the page read
+  "Unexpected exit code 5", like a bug in the scraper. It now says what
+  happened and what to check. The README's exit-code table still described
+  5 as "Remote API error" only.
+- **A refusal now says the exit's country has to match.** The 403 body is the
+  same for a datacentre address and for a residential one in the wrong country
+  (a German address is accepted by .de, .es and .pl and refused by the other
+  seven), so the log line names both causes instead of only the first.
+- **Raw page dumps (`--dump-html`, the automatic `_debug.html` ones) are
+  written 0600.** They were created with the default umask, so readable by
+  every local user. The mode is applied to an already-existing dump as well.
+- README: a note that macOS's system Python prints a urllib3/LibreSSL warning.
+
 - **farfetch-scraper leftovers removed from the bug template, SECURITY and
   `diff_runs.py`.** The bug-report template expected Farfetch's "96
   products, as the README says a category page yields"; it now quotes this

@@ -1659,6 +1659,77 @@ ENGINE_FILES = ("playwright_scraper.py", "puppeteer_scraper.py",
                 "selenium_scraper.py")
 
 
+def test_dumps_private_canary_and_block_hint():
+    """Three small guards from the 2026-10 audit, each controlled by planting
+    its fault. The canary one skips when the CI directory is absent (the
+    Docker image deliberately copies none)."""
+    import ast, os, stat, tempfile
+    from pathlib import Path
+    import output_writer, page_flow
+    ok = True
+    print("\n[dumps are private, canary knows exit 5, refusal names the country]")
+
+    # 1. open_private creates 0600 and tightens an existing 0644 file.
+    with tempfile.TemporaryDirectory() as d:
+        p = os.path.join(d, "dump.html")
+        with open(p, "w") as f:
+            f.write("old")
+        os.chmod(p, 0o644)
+        with output_writer.open_private(p) as f:
+            f.write("<html>")
+        mode = stat.S_IMODE(os.stat(p).st_mode)
+        ok &= check("open_private leaves an existing dump 0600", mode == 0o600)
+        ok &= check("open_private truncates and writes",
+                    Path(p).read_text() == "<html>")
+        # A NEW file, with a permissive umask: the mode passed to os.open is
+        # all that protects it, and the chmod above never saw this path.
+        q = os.path.join(d, "fresh.html")
+        old_umask = os.umask(0)
+        try:
+            with output_writer.open_private(q) as f:
+                f.write("x")
+        finally:
+            os.umask(old_umask)
+        # POSIX only: Windows has no such mode bits.
+        if os.name == "posix":
+            ok &= check("open_private creates a new dump 0600 even under "
+                        "umask 0", stat.S_IMODE(os.stat(q).st_mode) == 0o600)
+
+    # 2. No engine writes a dump through a plain open(..., "w").
+    here = Path(__file__).resolve().parent
+    scanned = 0
+    for name in ("playwright_scraper.py", "puppeteer_scraper.py",
+                 "selenium_scraper.py", "scraper_api_client.py"):
+        tree = ast.parse((here / name).read_text(encoding="utf-8"))
+        plain = [n.lineno for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "open"
+                 and len(n.args) > 1 and isinstance(n.args[1], ast.Constant)
+                 and n.args[1].value == "w"]
+        scanned += 1
+        ok &= check("%s opens no file with a plain open(.., 'w') (dumps use "
+                    "open_private)" % name, not plain)
+    ok &= check("the dump scan covered four files", scanned == 4)
+
+    # 3. Every engine appends the country hint to its refusal line.
+    for name in ("playwright_scraper.py", "puppeteer_scraper.py",
+                 "selenium_scraper.py"):
+        src = (here / name).read_text(encoding="utf-8")
+        ok &= check("%s logs page_flow.BLOCK_COUNTRY_HINT on a refusal" % name,
+                    "page_flow.BLOCK_COUNTRY_HINT" in src)
+    ok &= check("the hint names the country, not only 'residential'",
+                "COUNTRY" in page_flow.BLOCK_COUNTRY_HINT)
+
+    # 4. The canary's exit-code switch has a branch for 5.
+    ci_dir = here / (".git" + "hub")
+    if not ci_dir.is_dir():
+        print("  SKIP  no CI directory in this tree (the Docker image)")
+    else:
+        text = (ci_dir / "workflows" / "canary.yml").read_text(encoding="utf-8")
+        ok &= check("canary.yml interprets exit 5 explicitly",
+                    "\n            5)" in text)
+    return ok
+
+
 def test_wording():
     group("wording and removed flags")
     ok = True
@@ -2877,6 +2948,7 @@ def main() -> int:
     ok &= test_engines(skips)
     ok &= test_no_capture_leaks()
     ok &= test_ci_checks_is_actually_wired_up()
+    ok &= test_dumps_private_canary_and_block_hint()
     ok &= test_wording()
     ok &= test_fingerprint_client_reads_env()
     ok &= test_fingerprint_application()

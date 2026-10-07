@@ -90,6 +90,10 @@ touches the incompatible part — but `pip check` reports the conflict and pip
 may resolve it by downgrading something you wanted. Use a virtualenv per
 engine if you need more than one.
 
+**macOS system Python (3.9, built against LibreSSL)** makes urllib3 v2 print a
+`NotOpenSSLWarning` on every run. It is harmless to the scraper, and a
+Python from Homebrew or python.org (built against OpenSSL) removes it.
+
 Run the offline suite first. It needs no network, no browser and no
 credentials:
 
@@ -342,7 +346,7 @@ live connection — several `pid`s, one run each, is the way.
 | `2` | Bad usage (including a URL that is not a MediaMarkt host) |
 | `3` | Blocked — the 403 refusal, or a challenge |
 | `4` | Zero products — including a hub category, which is a correct answer |
-| `5` | Remote API error |
+| `5` | The content was never obtained — a remote API error, a navigation timeout, a dead or unauthenticated proxy. Nothing was written |
 | `6` | Partial — some pages fetched, then stopped early |
 
 **A run that finds nothing writes nothing.** Last night's good output is not

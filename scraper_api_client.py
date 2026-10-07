@@ -107,7 +107,7 @@ import requests
 
 from product_parser import (parse_products, detect_bot_challenge,
                             detect_page_state, BOT_CHALLENGE_MARKERS)
-from output_writer import save
+from output_writer import save, open_private
 import env_config
 import page_flow
 
@@ -291,7 +291,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
         return EXIT_API_ERROR
 
     if args.dump_html:
-        with open(args.dump_html, "w", encoding="utf-8") as f:
+        with open_private(args.dump_html) as f:
             f.write(html)
         logger.info("Raw HTML written to %s", args.dump_html)
 
@@ -300,7 +300,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
     state = detect_page_state(html, status=upstream_status, url=args.url)
     if state == "blocked":
         dump = f"{args.out}_scraperapi_debug.html"
-        with open(dump, "w", encoding="utf-8") as f:
+        with open_private(dump) as f:
             f.write(html)
         logger.error(
             "MediaMarkt refused the Scraper API's request (upstream HTTP %s, "
@@ -328,7 +328,7 @@ def _run_once(args, attempt: int = 1, attempts: int = 1) -> int:
 
     if not products:
         dump = f"{args.out}_scraperapi_debug.html"
-        with open(dump, "w", encoding="utf-8") as f:
+        with open_private(dump) as f:
             f.write(html)
         logger.warning("0 products parsed — saved the raw response to %s so you can see "
                        "what actually came back.", dump)
