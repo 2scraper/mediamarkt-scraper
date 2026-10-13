@@ -1150,7 +1150,7 @@ def parse_args():
                         "own browser and holds its own proxy exit, so N>1 "
                         "without --proxy-file just sends N times the traffic "
                         "from one address. Ignored with --cdp-endpoint.")
-    p.add_argument("--retries", type=int, default=3,
+    p.add_argument("--retries", type=page_flow.attempts, default=3,
                    help="Attempts per page load before giving up (default 3). "
                         "The pause between attempts doubles each time. A page "
                         "that comes back EMPTY is not retried — see "
