@@ -71,7 +71,7 @@ from product_parser import (parse_products, parse_product_detail,
                             SELECTORS, detect_bot_challenge, page_url,
                             listing_kind, site_host, is_supported_host,
                             total_results, HOSTS, unsupported_reason)
-from output_writer import dedupe_by_key, finish_run
+from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
 from proxy_pool import (from_args as proxy_pool_from_args, to_playwright, mask,
@@ -690,14 +690,15 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Saying "blocked" without naming a vendor is the honest answer, and
         # saying what actually clears it is more use than a captcha hint.
         debug_html = f"{args.out}_page{page_num}_debug.html"
-        with open(debug_html, "w", encoding="utf-8") as f:
+        with open_private(debug_html) as f:
             f.write(html)
         logger.error("MediaMarkt refused this request (its own error page "
                      "under HTTP 403) — saved to %s. There is no challenge on "
                      "that page to solve, so a 2Captcha key does not help; a "
                      "residential exit does. This is exit 3, distinct from a "
-                     "genuinely empty result (exit 4).%s", debug_html,
-                     f" Tried {block_retries + 1} exit(s)." if block_retries else "")
+                     "genuinely empty result (exit 4).%s%s", debug_html,
+                     f" Tried {block_retries + 1} exit(s)." if block_retries else "",
+                     page_flow.BLOCK_COUNTRY_HINT)
         outcome.blocked_by = "mediamarkt-403"
         outcome.final_url = session.page.url
         return outcome
@@ -739,7 +740,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     if args.dump_html:
         dump_path = (args.dump_html if args.pages == 1
                      else f"{args.dump_html}.page{page_num}")
-        with open(dump_path, "w", encoding="utf-8") as f:
+        with open_private(dump_path) as f:
             f.write(html)
         logger.info("Saved the snapshot the parser sees to %s (%d bytes).",
                     dump_path, len(html))
@@ -758,7 +759,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
               if state != "content" else None)
     if vendor:
         debug_html = f"{args.out}_page{page_num}_debug.html"
-        with open(debug_html, "w", encoding="utf-8") as f:
+        with open_private(debug_html) as f:
             f.write(html)
         try:
             session.page.screenshot(path=f"{args.out}_page{page_num}_debug.png",
@@ -825,7 +826,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     if not products:
         debug_html = f"{args.out}_page{page_num}_debug.html"
         debug_png = f"{args.out}_page{page_num}_debug.png"
-        with open(debug_html, "w", encoding="utf-8") as f:
+        with open_private(debug_html) as f:
             f.write(html)
         try:
             session.page.screenshot(path=debug_png, full_page=True)

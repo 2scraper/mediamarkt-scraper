@@ -282,6 +282,21 @@ def _csv_value(v: Any) -> Any:
     return v
 
 
+def open_private(path: str):
+    """Open ``path`` for text writing, readable by the owner only (0600).
+
+    For raw page dumps: a snapshot is whatever the site served to THIS session,
+    and a default-umask file (0644) is readable by every local user. The mode
+    applies on creation, so an already-existing dump is tightened too.
+    """
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # a filesystem without modes (FAT, some mounts) — best effort
+    return os.fdopen(fd, "w", encoding="utf-8")
+
+
 def write_json(rows: Sequence[Any], path: str) -> None:
     with _atomic(path) as f:
         json.dump([asdict(r) for r in rows], f, ensure_ascii=False, indent=2)

@@ -148,6 +148,7 @@ jobs:
             0)   echo "OK — products parsed from a live run." ;;
             3)   echo "::error::Blocked before parsing (exit 3). On this site that means the exit address was refused, NOT that a captcha needs solving — MediaMarkt's block page carries no challenge. Check that MEDIAMARKT_PROXY is still a working residential exit before suspecting the site." ;;
             4)   echo "::error::Ran fine but parsed 0 rows (exit 4) on a leaf category known to have thousands. Either the site changed, or this URL has become a hub page. The HTML dump in the artifacts tells you which." ;;
+            5)   echo "::error::The page was never obtained (exit 5): a dead or expired MEDIAMARKT_PROXY, a navigation timeout or a proxy that will not authenticate. This is NOT an empty catalogue and not a parser fault. Check that the secret is still a working residential exit in Germany before suspecting the site." ;;
             6)   echo "::error::Partial run (exit 6) — some pages were gathered and then the run stopped early. canary_run.meta.json names which pages failed; a mid-run block usually means one address is being pushed too hard." ;;
             2)   echo "::error::Bad usage (exit 2) — the workflow's own arguments are wrong, not the site." ;;
             *)   echo "::error::Unexpected exit code $code (see the step above for the traceback)." ;;
