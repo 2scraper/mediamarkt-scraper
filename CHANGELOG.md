@@ -13,6 +13,8 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-10-15
+
 > **Behaviour changes in this batch:**
 > * `--pages 0`, `--concurrency 0` and negative values of `--pages`,
 >   `--concurrency`, `--proxy-block-retries`, `--delay` and `--retry-delay`
