@@ -1202,6 +1202,33 @@ def test_captcha():
     ok = True
     from captcha_solver import CaptchaChallenge
 
+    # A challenge frame settles the variant as v2: v3 never renders one. A
+    # frame with no `size` and no `render` used to fall through to v3, and a
+    # paid solve would have bought the wrong task type.
+    frame = {"found": True, "sitekey": "k" * 40, "size": None,
+             "renderParam": None, "challengeFrame": True}
+    got = detect_recaptcha_in_page(lambda js: frame)
+    ok &= check("a challenge frame with no size/render is v2, not v3 (got %s)"
+                % (got and got.kind), got is not None and got.kind == "recaptcha_v2")
+    got = detect_recaptcha_in_page(lambda js: dict(frame, size="invisible"))
+    ok &= check("a challenge frame with size=invisible is v2-invisible",
+                got is not None and got.kind == "recaptcha_v2_invisible")
+    got = detect_recaptcha_in_page(lambda js: dict(frame, size="invisible",
+                                                   challengeFrame=False))
+    ok &= check("no frame and size=invisible is still read as v3",
+                got is not None and got.kind == "recaptcha_v3")
+    # Enterprise: this repo does not implement that task type, so nothing is
+    # bought for it. Raised before any request, so no key is ever sent.
+    from captcha_solver import solve_recaptcha
+    ent = detect_recaptcha_in_page(lambda js: dict(frame, enterprise=True))
+    try:
+        solve_recaptcha(ent, "not-a-key")
+        refused = False
+    except RuntimeError as e:
+        refused = "Enterprise" in str(e)
+    ok &= check("an Enterprise reCAPTCHA is flagged and refused before any "
+                "solve is bought", ent.enterprise and refused)
+
     # Format 2: the site's own wrapper element carries the config as
     # attributes, with the execute() call inside a bundled file that never
     # appears as readable inline script.
@@ -1770,10 +1797,10 @@ def test_fingerprint_client_reads_env():
     # THE DEFECT THIS PINS, found the first time --fingerprint was run live
     # here and confirmed present in five sibling repos: `--key` defaulted to
     # `os.environ.get("TWOCAPTCHA_KEY")` alone. So a key put in `.env` —
-    # which is exactly what §3, the README and .env.example instruct — worked
+    # which is exactly what the README and .env.example instruct — worked
     # for every engine and failed HERE with "No API key". A documented
-    # mechanism not applied on one path, which is the shape of half the
-    # defects §16 lists.
+    # mechanism not applied on one path, a common shape of defect in
+    # copied code.
     src = inspect.getsource(fpc.main)
     ok &= check("it loads .env itself, rather than hoping an engine did",
                 "env_config.load_env()" in src)
@@ -2088,7 +2115,7 @@ def test_dockerfile_copies_what_it_runs():
 
 
 def test_shared_calls_bind_against_the_real_signature():
-    """§17's check #1: bind every call into a shared module against the
+    """Bind every call into a shared module against the
     callee's real signature.
 
     This exists because of a defect that no other check in this suite can
@@ -2409,6 +2436,417 @@ def test_retries_is_validated_in_every_entry_point():
     return check("--retries is validated in every entry point, so 0 is a usage error", not problems)
 
 
+
+# ---------------------------------------------------------------------------
+# Output files are replaced atomically, with the modes open() would give
+# ---------------------------------------------------------------------------
+def test_atomic_writes():
+    group("output writes are atomic and keep the umask's modes")
+    ok = True
+    import output_writer as ow
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "out")
+        good = [Product(sku="1", url="u1", price=1.0)]
+        save(good, prefix, "both")
+        before_json = open(prefix + ".json").read()
+        before_csv = open(prefix + ".csv").read()
+
+        class Boom(Exception):
+            pass
+
+        def exploding_asdict(_row):
+            raise Boom("disk full halfway through")
+
+        real_asdict = ow.asdict
+        ow.asdict = exploding_asdict
+        try:
+            for writer, path in ((lambda: ow.write_json(good * 3, prefix + ".json"),
+                                  prefix + ".json"),
+                                 (lambda: ow.write_csv(good * 3, prefix + ".csv"),
+                                  prefix + ".csv")):
+                try:
+                    writer()
+                except Boom:
+                    pass
+        finally:
+            ow.asdict = real_asdict
+        ok &= check("a write that fails halfway leaves the previous JSON intact",
+                    open(prefix + ".json").read() == before_json)
+        ok &= check("a write that fails halfway leaves the previous CSV intact",
+                    open(prefix + ".csv").read() == before_csv)
+        leftovers = [n for n in os.listdir(d) if n.endswith(".tmp")]
+        ok &= check("a failed write leaves no temp file behind (%s)" % leftovers,
+                    not leftovers)
+
+        # The sidecar goes through the same writer.
+        meta_path = ow.write_run_meta(prefix, {"status": "complete"})
+        ok &= check("the sidecar is written through the atomic writer",
+                    "_atomic(" in inspect.getsource(ow.write_run_meta)
+                    and json.load(open(meta_path))["status"] == "complete")
+
+        # Modes: a NEW file gets exactly what open() would give it under the
+        # current umask, and an EXISTING file keeps its own mode. A flat
+        # 0o644 would pass under 022 and fail under 002, so both are tried.
+        if os.name == "posix":
+            modes = {}
+            for umask in (0o022, 0o002, 0o077):
+                old = os.umask(umask)
+                try:
+                    p = os.path.join(d, "new_%o.json" % umask)
+                    ow.write_json(good, p)
+                    modes[umask] = os.stat(p).st_mode & 0o777
+                finally:
+                    os.umask(old)
+            ok &= check("a new output file honours the umask (022->644, "
+                        "002->664, 077->600): got %s"
+                        % {oct(k): oct(v) for k, v in modes.items()},
+                        modes == {0o022: 0o644, 0o002: 0o664, 0o077: 0o600})
+            p = os.path.join(d, "kept.json")
+            ow.write_json(good, p)
+            os.chmod(p, 0o640)
+            ow.write_json(good, p)
+            ok &= check("an existing output file keeps its own mode",
+                        os.stat(p).st_mode & 0o777 == 0o640)
+    return ok
+
+
+def test_csv_formula_guard():
+    group("CSV cells that a spreadsheet would execute are neutralised")
+    ok = True
+    row = Product(sku="1", url="u", title="=HYPERLINK(\"http://x\")",
+                  category="+cmd", price=-5.0, images=["@SUM(1)", "b"])
+    with tempfile.TemporaryDirectory() as d:
+        prefix = os.path.join(d, "out")
+        rc = finish_run([row], prefix, "both", False, blocked=False,
+                        stop_reason="completed", pages_requested=1,
+                        pages_completed=1, start_url="u", final_url="u",
+                        extra={"total_results": 7})
+        import csv as _csv
+        cells = next(_csv.DictReader(open(prefix + ".csv", newline="",
+                                          encoding="utf-8")))
+        ok &= check("a formula-shaped title is prefixed with an apostrophe in CSV",
+                    cells["title"] == "'=HYPERLINK(\"http://x\")")
+        ok &= check("a +cmd category is prefixed too", cells["category"] == "'+cmd")
+        ok &= check("a joined list starting with @ is escaped AFTER joining",
+                    cells["images"].startswith("'@SUM(1)"))
+        ok &= check("a negative NUMBER stays a number (no apostrophe)",
+                    cells["price"] == "-5.0")
+        data = json.load(open(prefix + ".json"))[0]
+        ok &= check("the JSON output keeps the site's bytes unescaped",
+                    data["title"].startswith("=HYPERLINK") and data["images"][0] == "@SUM(1)")
+        meta = json.load(open(prefix + ".meta.json"))
+        ok &= check("csv_cells_escaped is recorded in the sidecar (3)",
+                    meta.get("csv_cells_escaped") == 3 and rc == 0)
+        ok &= check("the caller's own extra still reaches the sidecar",
+                    meta.get("total_results") == 7)
+        # Under the caller's extra, never over it.
+        finish_run([row], prefix, "both", False, blocked=False,
+                   stop_reason="completed", pages_requested=1,
+                   pages_completed=1, start_url="u", final_url="u",
+                   extra={"csv_cells_escaped": "caller"})
+        meta = json.load(open(prefix + ".meta.json"))
+        ok &= check("csv_cells_escaped is merged UNDER the caller's extra",
+                    meta.get("csv_cells_escaped") == "caller")
+        # A complete run that the user allowed to be empty is complete.
+        finish_run([], prefix, "json", True, blocked=False,
+                   stop_reason="completed", pages_requested=1,
+                   pages_completed=1, start_url="u", final_url="u")
+        meta = json.load(open(prefix + ".meta.json"))
+        ok &= check("an --allow-empty run that finished is 'complete', not 'failed'",
+                    meta["status"] == "complete")
+    return ok
+
+
+# ---------------------------------------------------------------------------
+# One paid solve per page, in every engine, read off disk
+# ---------------------------------------------------------------------------
+ENGINE_FILES = ("playwright_scraper.py", "puppeteer_scraper.py",
+                "selenium_scraper.py")
+
+
+def _solve_budget_problems(root=REPO_ROOT):
+    """Source-level reasons an engine could buy more than one solve per page.
+
+    Read from disk with `ast`, never through an import, so it runs for every
+    engine whether or not its driver is installed.
+    """
+    problems = []
+    for name in ENGINE_FILES:
+        tree = ast.parse(open(os.path.join(root, name), encoding="utf-8").read())
+        funcs = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        handler = funcs.get("handle_captcha_if_present")
+        fetch = funcs.get("_fetch_one_page")
+        if handler is None or fetch is None:
+            problems.append("%s: handle_captcha_if_present or _fetch_one_page is missing" % name)
+            continue
+        # 1. Every purchase in the handler sits after a `budget.take()` guard.
+        take_lines = [n.lineno for n in ast.walk(handler)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                      and n.func.attr == "take"
+                      and getattr(n.func.value, "id", None) == "budget"]
+        buys = [n.lineno for n in ast.walk(handler)
+                if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "solve_recaptcha"]
+        if not buys:
+            problems.append("%s: no solve_recaptcha call found (check is stale)" % name)
+        for line in buys:
+            if not any(t < line for t in take_lines):
+                problems.append("%s:%d buys a solve without budget.take() first" % (name, line))
+        # 2. Every call of the handler anywhere in the file passes a budget.
+        for n in ast.walk(tree):
+            if (isinstance(n, ast.Call)
+                    and getattr(n.func, "id", None) == "handle_captcha_if_present"):
+                names = {getattr(a, "id", None) for a in n.args} | {
+                    getattr(k.value, "id", None) for k in n.keywords}
+                if "budget" not in names:
+                    problems.append("%s:%d calls the captcha handler without "
+                                    "the page's budget" % (name, n.lineno))
+        # 3. The budget is created once per page, BEFORE the block-retry
+        #    loop, so a retry or a rotation cannot reset it.
+        made = [n.lineno for n in ast.walk(fetch)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                and n.func.attr == "SolveBudget"]
+        loops = [n.lineno for n in ast.walk(fetch) if isinstance(n, ast.For)]
+        if len(made) != 1 or not loops or made[0] > min(loops):
+            problems.append("%s: the SolveBudget is not created exactly once "
+                            "before the retry loop (made at %s, first loop %s)"
+                            % (name, made, min(loops) if loops else None))
+    return problems
+
+
+class _Anything:
+    """A stand-in driver object: every attribute and call yields another one,
+    and it is an empty sequence, so `len(page.query_selector_all(...))` is 0."""
+
+    def __getattr__(self, _name):
+        return _Anything()
+
+    def __call__(self, *a, **k):
+        return _Anything()
+
+    def __len__(self):
+        return 0
+
+    def __iter__(self):
+        return iter(())
+
+    def __str__(self):
+        return "https://www.mediamarkt.de/de/category/x-1.html"
+
+
+def _solves_bought_by_handler(mod):
+    """Call an engine's real captcha handler twice with ONE page budget, with a
+    challenge always present and the solver stubbed; return the purchases."""
+    from captcha_solver import CaptchaChallenge
+    bought = []
+    patched = {
+        "solve_recaptcha": lambda *a, **k: bought.append(1) or "tok",
+        "reconcile_detections": lambda *a, **k: CaptchaChallenge(
+            kind="recaptcha_v2", sitekey="k" * 40),
+        "detect_recaptcha_v3": lambda *a, **k: None,
+        "detect_recaptcha_in_page": lambda *a, **k: None,
+        "_content_when_settled": lambda *a, **k: "<html></html>",
+        "_content": lambda *a, **k: "<html></html>",
+        "_driver": lambda *a, **k: {"content": lambda: "<html></html>",
+                                    "count": lambda sel: 0,
+                                    "current_url": lambda: "u"},
+        "time": type("T", (), {"sleep": staticmethod(lambda s: None)}),
+    }
+    saved = {k: getattr(mod, k) for k in patched if hasattr(mod, k)}
+    try:
+        for k, v in patched.items():
+            if k in saved:
+                setattr(mod, k, v)
+        args = type("A", (), dict(mode="listing", solve_captcha="always",
+                                  twocaptcha_key="x", captcha_api="v2",
+                                  min_score=0.7))()
+        budget = page_flow.SolveBudget()
+        for _ in range(3):
+            mod.handle_captcha_if_present(_Anything(), args, budget)
+    finally:
+        for k, v in saved.items():
+            setattr(mod, k, v)
+    return len(bought)
+
+
+def test_solve_budget():
+    group("a page can buy at most SOLVES_PER_PAGE solves, in every engine")
+    ok = True
+    for name in ENGINE_FILES:
+        modname = name[:-3]
+        try:
+            mod = __import__(modname)
+        except ImportError:
+            continue  # recorded as a skip by test_engines
+        n = _solves_bought_by_handler(mod)
+        ok &= check("%s: three challenged attempts on one page buy %d solve(s), "
+                    "not more" % (modname, page_flow.SOLVES_PER_PAGE),
+                    n == page_flow.SOLVES_PER_PAGE)
+    b = page_flow.SolveBudget()
+    ok &= check("SOLVES_PER_PAGE is 1", page_flow.SOLVES_PER_PAGE == 1)
+    ok &= check("the first take() is allowed and the second refused",
+                b.take() is True and b.take() is False and b.spent == 1)
+    problems = _solve_budget_problems()
+    for line in problems:
+        print("      " + line)
+    ok &= check("every engine routes every solve through the per-page budget",
+                not problems)
+    return ok
+
+
+def _status_problems(root=REPO_ROOT):
+    """Classify call sites in the engines that drop the HTTP status."""
+    problems = []
+    for name in ENGINE_FILES:
+        tree = ast.parse(open(os.path.join(root, name), encoding="utf-8").read())
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and ((isinstance(n.func, ast.Attribute) and n.func.attr == "classify")
+                      or getattr(n.func, "id", None) == "_classify")]
+        # The helper _classify(page, html, status=None) forwards its own
+        # parameter; that one call is the definition's body, not a call site.
+        calls = [c for c in calls
+                 if not (isinstance(c.func, ast.Attribute) and c.func.attr == "classify"
+                         and any(k.arg == "status" and getattr(k.value, "id", None) == "status"
+                                 for k in c.keywords)
+                         and name == "playwright_scraper.py"
+                         and c.lineno < 200)]
+        if not calls:
+            problems.append("%s: no classify call found (check is stale)" % name)
+        for c in calls:
+            kw = {k.arg: k.value for k in c.keywords}
+            if "status" not in kw:
+                problems.append("%s:%d classifies without passing status=" % (name, c.lineno))
+            elif name != "selenium_scraper.py" and isinstance(kw["status"], ast.Constant):
+                problems.append("%s:%d passes a constant status; this driver "
+                                "reports a real one" % (name, c.lineno))
+    return problems
+
+
+def test_status_reaches_the_classifier():
+    group("the HTTP status reaches the page classifier")
+    ok = True
+    problems = _status_problems()
+    for line in problems:
+        print("      " + line)
+    ok &= check("Playwright and pyppeteer pass goto()'s status to classify; "
+                "Selenium passes an explicit None", not problems)
+    ok &= check("a 403 classifies as blocked whatever the body says",
+                page_flow.classify('<a href="/de/product/x-1.html">x</a>',
+                                   status=403) == "blocked")
+    # Behaviour, where the driver is installed: a 403 from goto() must decide
+    # the page even when the body looks like content.
+    try:
+        import playwright_scraper as pw
+    except ImportError:
+        return ok  # recorded as a skip by test_engines
+
+    class Resp:
+        status = 403
+
+    class Page:
+        url = "https://www.mediamarkt.de/de/category/x-1.html"
+
+        def goto(self, *a, **k):
+            return Resp()
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: None
+
+    class Session:
+        page = Page()
+
+    body = '<html><a href="/de/product/_x-123.html">x</a></html>'
+    saved = (pw._content_when_settled, pw.handle_captcha_if_present)
+    pw._content_when_settled = lambda page, *a, **k: body
+    pw.handle_captcha_if_present = lambda *a, **k: False
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            args = type("A", (), dict(proxy_block_retries=0, pages=1, retries=1,
+                                      retry_delay=0, mode="listing",
+                                      out=os.path.join(d, "o"), dump_html=None,
+                                      category=None))()
+            with redirect_stdout(io.StringIO()):
+                outcome = pw._fetch_one_page(Session(), args, None, 1, Page.url)
+    finally:
+        pw._content_when_settled, pw.handle_captcha_if_present = saved
+    ok &= check("playwright: a 403 from goto() makes the page 'blocked' even "
+                "with a product link in the body (got %r)" % outcome.state,
+                outcome.state == "blocked")
+    return ok
+
+
+def test_numeric_flags_are_validated():
+    group("numeric flags reject values that make no sense, naming the flag")
+    ok = True
+    bad = {"--pages": ["0", "-1"], "--concurrency": ["0", "-2"],
+           "--proxy-block-retries": ["-1"], "--delay": ["-1"],
+           "--retry-delay": ["-0.5"]}
+    for name in ENGINE_FILES:
+        src = open(os.path.join(REPO_ROOT, name), encoding="utf-8").read()
+        for flag, typ in (("--pages", "pages_arg"), ("--concurrency", "concurrency_arg"),
+                          ("--proxy-block-retries", "block_retries_arg"),
+                          ("--delay", "delay_arg"), ("--retry-delay", "retry_delay_arg")):
+            ok &= check("%s: %s goes through page_flow.%s" % (name, flag, typ),
+                        re.search(r'add_argument\("%s",\s*type=page_flow\.%s\b'
+                                  % (re.escape(flag), typ), src) is not None)
+    import argparse as _ap
+    for flag, values in bad.items():
+        typ = {"--pages": page_flow.pages_arg, "--concurrency": page_flow.concurrency_arg,
+               "--proxy-block-retries": page_flow.block_retries_arg,
+               "--delay": page_flow.delay_arg,
+               "--retry-delay": page_flow.retry_delay_arg}[flag]
+        for v in values:
+            try:
+                typ(v)
+                raised = ""
+            except _ap.ArgumentTypeError as e:
+                raised = str(e)
+            ok &= check("%s %s is rejected with a message naming the flag" % (flag, v),
+                        raised.startswith(flag))
+    ok &= check("valid values pass: --pages 3, --proxy-block-retries 0, --delay 0",
+                page_flow.pages_arg("3") == 3 and page_flow.block_retries_arg("0") == 0
+                and page_flow.delay_arg("0") == 0.0)
+    api = open(os.path.join(REPO_ROOT, "scraper_api_client.py"), encoding="utf-8").read()
+    ok &= check("scraper_api_client: --retries (extra attempts) rejects a "
+                "negative value and still allows 0",
+                "type=page_flow.extra_retries_arg" in api
+                and page_flow.extra_retries_arg("0") == 0)
+    return ok
+
+
+def test_no_private_citations():
+    group("public files cite no private instruction file")
+    ok = True
+    # Assembled from pieces so this file does not match itself.
+    banned = ["CLAUDE" + ".md", "claude_" + "2scraper", "2scraper_" + "repo_rules",
+              "play" + "book"]
+    section = re.compile("§" + r"\s*\d")
+    try:
+        tracked = subprocess.run(["git", "ls-files"], cwd=REPO_ROOT,
+                                 capture_output=True, text=True)
+    except OSError:
+        tracked = None
+    if tracked is None or tracked.returncode != 0:
+        print("      (not a git checkout: scanning nothing, which is the "
+              "Docker build's case)")
+        return ok
+    hits = []
+    for rel in tracked.stdout.split():
+        path = os.path.join(REPO_ROOT, rel)
+        if not os.path.isfile(path) or rel.endswith((".png", ".ico")):
+            continue
+        text = open(path, encoding="utf-8", errors="replace").read()
+        for token in banned:
+            if token.lower() in text.lower():
+                hits.append("%s: %s" % (rel, token))
+        if section.search(text):
+            hits.append("%s: a bare section reference" % rel)
+    for h in hits:
+        print("      " + h)
+    ok &= check("no tracked file cites a private instruction file or its "
+                "section numbers", not hits)
+    return ok
+
+
 def main() -> int:
     ok = True
     # Checks that could not run because an optional engine library is absent.
@@ -2450,6 +2888,12 @@ def main() -> int:
     ok &= test_sample_output()
     ok &= test_x_debug_header_is_redacted()
     ok &= test_scraper_api_payload_and_status()
+    ok &= test_atomic_writes()
+    ok &= test_csv_formula_guard()
+    ok &= test_solve_budget()
+    ok &= test_status_reaches_the_classifier()
+    ok &= test_numeric_flags_are_validated()
+    ok &= test_no_private_citations()
 
     print()
     if _failures:

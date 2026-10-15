@@ -99,6 +99,11 @@ class CaptchaChallenge:
     # Raw `size` from the reCAPTCHA client config, when available:
     # "invisible" for v2-invisible and for v3, absent for a v2 checkbox.
     size: Optional[str] = None
+    # True when the live page runs reCAPTCHA ENTERPRISE. Enterprise needs its
+    # own task type, which this repo does not implement, and an ordinary
+    # v2/v3 token is rejected by an enterprise widget, so solve_recaptcha
+    # refuses to buy one rather than paying for a token the site will refuse.
+    enterprise: bool = False
 
     @property
     def is_v3(self) -> bool:
@@ -306,6 +311,8 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
       * `size == "invisible"` with no challenge frame is treated as v3,
         which is v3's normal appearance (badge only).
       * a `normal`/`compact` size is a v2 checkbox.
+      * a challenge frame with no `size` and no `render` is a v2 checkbox:
+        v3 renders no frame at all, so a frame rules v3 out.
     When the two signals disagree the ambiguity is recorded in the returned
     challenge's `kind` and in the log, rather than silently guessing — pick
     the wrong one and 2captcha returns a token the site rejects.
@@ -340,8 +347,12 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
         kind = "recaptcha_v2_invisible" if size == "invisible" else "recaptcha_v2"
     elif size in ("normal", "compact"):
         kind = "recaptcha_v2"
-    elif info.get("challengeFrame") and size == "invisible":
-        kind = "recaptcha_v2_invisible"
+    elif info.get("challengeFrame"):
+        # A challenge frame settles it as v2, whatever `size` says or omits:
+        # v3 never renders one. Before this rung, a frame with no `size` and
+        # no `render` fell through to v3 and a paid solve bought the wrong
+        # task type.
+        kind = "recaptcha_v2_invisible" if size == "invisible" else "recaptcha_v2"
     else:
         kind = "recaptcha_v3"
 
@@ -351,8 +362,9 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
                 kind, info["sitekey"], size, render, info.get("challengeFrame"),
                 info.get("containerId"), "; ".join(hints))
     if info.get("enterprise"):
-        logger.warning("This is a reCAPTCHA ENTERPRISE widget — 2captcha needs its "
-                       "enterprise method, which this project does not implement.")
+        logger.warning("This is a reCAPTCHA ENTERPRISE widget. Solving it needs "
+                       "the enterprise task type, which this repo does not "
+                       "implement yet, so no solve will be bought for it.")
 
     return CaptchaChallenge(
         kind=kind,
@@ -361,6 +373,7 @@ def detect_recaptcha_in_page(evaluate, page_url: str = "") -> Optional[CaptchaCh
         page_url=page_url,
         source="runtime",
         size=size,
+        enterprise=bool(info.get("enterprise")),
     )
 
 
@@ -414,6 +427,8 @@ def reconcile_detections(html_challenge: Optional[CaptchaChallenge],
         # path often can't see it.
         if html_challenge.action and html_challenge.action != "verify":
             runtime_challenge.action = html_challenge.action
+    runtime_challenge.enterprise = (runtime_challenge.enterprise
+                                    or html_challenge.enterprise)
     return runtime_challenge
 
 
@@ -590,6 +605,12 @@ def solve_recaptcha(challenge: CaptchaChallenge, twocaptcha_api_key: Optional[st
             "API you may not need either: Captcha.setAutoSolve can clear it "
             "inside the browser."
         )
+    if getattr(challenge, "enterprise", False):
+        # Checked before any request is made, so nothing is billed.
+        raise RuntimeError(
+            "This is a reCAPTCHA Enterprise widget. This repo does not implement "
+            "the enterprise task type yet, and an ordinary reCAPTCHA token would "
+            "be rejected by it, so no solve was bought.")
     solver = _solve_with_2captcha_v1 if api_version == "v1" else _solve_with_2captcha_v2
     return solver(twocaptcha_api_key, challenge, min_score=min_score)
 
@@ -653,4 +674,4 @@ solve_recaptcha_v3 = solve_recaptcha
 # what the address has been doing — a narrow list is how a challenge gets
 # reported as an empty page months later. A solver for a challenge this site
 # has never been observed to serve is dead code; a DETECTOR for one is cheap
-# insurance. See the family note in CLAUDE.md.
+# insurance.

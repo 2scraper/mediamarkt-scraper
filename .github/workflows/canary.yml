@@ -17,11 +17,21 @@ name: canary
 # single day — and a check that is always red teaches everyone to ignore
 # checks, which is worse than having no check at all.
 #
-# So the live steps below are SKIPPED, not failed, when the secret is absent.
-# The job goes green with a notice saying why. Set the secret and the same
-# workflow starts doing real work with no edit:
+# So the live steps need the secret, and WITHOUT it the job FAILS, naming
+# the missing secret. It used to skip green with a notice, and a green badge
+# over a canary that tested nothing is worse than a red one: it says the site
+# was checked when it was not. Set the secret and the same workflow starts
+# doing real work with no edit:
 #
 #     gh secret set MEDIAMARKT_PROXY --repo 2scraper/mediamarkt-scraper
+#
+# A secret that is SET but dead fails too, and says so. From 2026-09-10 every
+# scheduled run timed out loading page 1 through the proxy and ended "exit 5";
+# the run itself cannot tell a dead proxy from a slow site. The preflight step
+# (.github/canary_preflight.py) asks the proxy directly with short timeouts and
+# names the cause: unreachable gateway, rejected credentials (407), a tunnel
+# that never opens, or a connection that delivers nothing (the shape of an
+# expired or out-of-traffic proxy account). Only then does the browser run.
 #
 # It must be a RESIDENTIAL exit, and for this URL a German one — the site
 # geo-redirects a cookie-less visit on the exit IP, and a run redirected to
@@ -51,29 +61,53 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Explain a skipped run
+      - name: Require the proxy secret
         if: env.HAVE_PROXY != 'true'
         run: |
-          echo "::notice::Skipping the live run: no MEDIAMARKT_PROXY secret is set."
+          echo "::error::Missing secret MEDIAMARKT_PROXY: the canary cannot test the site without it."
           echo "MediaMarkt answers every datacentre address with HTTP 403, and a"
-          echo "GitHub runner is one, so a run from here would be red every day"
-          echo "whatever the state of the code. Set a residential German exit as"
-          echo "the MEDIAMARKT_PROXY repository secret to turn this canary on:"
+          echo "GitHub runner is one. Set a residential GERMAN exit as the"
+          echo "MEDIAMARKT_PROXY repository secret:"
           echo
           echo "    gh secret set MEDIAMARKT_PROXY --repo 2scraper/mediamarkt-scraper"
-          echo
-          echo "The offline suite (tests.yml) covers everything that does not"
-          echo "need the network, and it runs on every push."
+          exit 1
+
+      - name: Can this runner reach the site without a proxy?
+        if: always()
+        # Informational, never fails the job. It separates "the site is down"
+        # from "the site refuses this address": a 403 here is the expected
+        # datacentre refusal, a 000 means the site did not answer at all.
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 \
+            -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" \
+            "https://www.mediamarkt.de/de/category/k%C3%BChlen-gefrieren-32.html" || true)
+          case "$code" in
+            403) echo "::notice::Bare runner: HTTP 403, the site's datacentre refusal. The site is up; the proxy is what has to get past it." ;;
+            200) echo "::notice::Bare runner: HTTP 200. The site served a datacentre address today, so a failure below is about the proxy, not the site." ;;
+            000) echo "::warning::Bare runner: no HTTP answer from mediamarkt.de within 30 s. The site or the network may be down." ;;
+            *)   echo "::notice::Bare runner: HTTP $code." ;;
+          esac
 
       - uses: actions/setup-python@v5
         if: env.HAVE_PROXY == 'true'
         with:
           python-version: "3.12"
 
+      - name: Check the proxy before the browser run
+        if: env.HAVE_PROXY == 'true'
+        # Fails the job with an ::error:: that names the cause when the proxy
+        # cannot deliver a page, and then the browser run is not attempted:
+        # it would only time out three times and report exit 5.
+        env:
+          MEDIAMARKT_PROXY: ${{ secrets.MEDIAMARKT_PROXY }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python .github/canary_preflight.py
+
       - name: Install Playwright engine
         if: env.HAVE_PROXY == 'true'
         run: |
-          python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-playwright.txt
           playwright install --with-deps chromium
 
