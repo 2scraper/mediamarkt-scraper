@@ -13,6 +13,67 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour changes in this batch:**
+> * `--pages 0`, `--concurrency 0` and negative values of `--pages`,
+>   `--concurrency`, `--proxy-block-retries`, `--delay` and `--retry-delay`
+>   are now usage errors (exit 2) naming the flag, in all three engines. A
+>   negative `--retries` or `--retry-delay` is rejected by
+>   `scraper_api_client.py` too (0 stays legal there: it counts extra tries).
+> * A page buys at most ONE paid captcha solve, however many times it is
+>   retried or rotated to another exit. Before, a pool of 4 exits could buy 4.
+> * Output files are now written to a temporary file and renamed into place.
+>   A new file gets the same mode `open()` gave it (the umask decides); an
+>   existing file keeps its own mode.
+> * CSV cells that start with `=`, `+`, `-`, `@`, a tab, CR or LF get a
+>   leading apostrophe so a spreadsheet shows them as text. Only text cells,
+>   only in the CSV; the sidecar records how many as `csv_cells_escaped`.
+> * A complete run saved with `--allow-empty` and 0 rows is now
+>   `status: complete` in the sidecar, not `failed`.
+> * The canary FAILS when the `MEDIAMARKT_PROXY` secret is missing, instead
+>   of skipping green.
+
+### Fixed (audit 2026-10-14)
+
+- **A failed write destroyed the previous good output.** `open(path, "w")`
+  truncates first, so an error halfway through `json.dump` left a broken
+  file where a good one had been. JSON, CSV and the `.meta.json` sidecar now
+  go through one atomic writer (temp file in the same directory, fsync,
+  rename, temp file removed on error).
+- **CSV formula injection.** Titles, categories and other site text are
+  written by the shop or a seller; a cell beginning with a formula character
+  is now neutralised in the CSV. JSON keeps the site's exact text.
+- **The per-page solve allowance did not exist.** Every engine now creates
+  one `page_flow.SolveBudget` per page, before the retry loop, and checks it
+  before buying a solve.
+- **A reCAPTCHA challenge frame with no `size` and no `render` was taken for
+  v3**, so a paid solve would have bought the wrong task type. A challenge
+  frame now always means v2 (v3 never renders one).
+- **An Enterprise reCAPTCHA was handed to the ordinary solver.** This repo
+  does not implement the enterprise task type yet, and an ordinary token is
+  rejected by an enterprise widget, so no solve is bought for one now.
+- **The HTTP status never reached the page classifier** in the browser
+  engines, although it is this site's strongest block signal. Playwright and
+  pyppeteer now pass `goto()`'s status; Selenium cannot see one and says so.
+- **The credential scan could scan nothing and report clean.** Its
+  directory exclusions were tested against the ABSOLUTE path, so a clone
+  inside any directory named `venv` or `.venv` scanned 0 files. It now
+  judges paths relative to the repo, fails when it scanned nothing, and also
+  reads `.json` files and renamed `.env` copies such as `.env.bak`.
+- **`.gitignore`** now also covers `--dump-html` page dumps of any name
+  (`*.page[0-9]*`), bare HTML dumps at the repo root, and working
+  directories such as `live/` and `out/`.
+- **The canary said "Unexpected exit code" for five weeks.** Every scheduled
+  run since 2026-09-10 timed out loading page 1 through the proxy secret. A
+  preflight step now asks the proxy directly and names the cause (unreachable
+  gateway, rejected credentials, a tunnel that never opens, or a connection
+  that delivers nothing), and a bare-runner request shows whether the site
+  itself is up.
+- Wording: "ten country sites" (not eleven), the README no longer quotes a
+  check count that goes stale, and the Scraper API `--wait-element` example
+  uses this site's product-card selector.
+- References to private notes were removed from comments, the suite and this
+  changelog; a check keeps them out.
+
 > **Behaviour change:** `--retries 0` is now a usage error (exit 2). It used
 > to be accepted and made the page-load loop unreachable, so nothing was
 > fetched and the engine reported the browser's own blank page as a result:
@@ -61,7 +122,7 @@ with it, so nobody discovers it from a bill or from a diff.
 ### Added
 
 - **A check that binds every call into a shared module against the callee's
-  real signature** (§17's check #1), which this repo did not have. It catches
+  real signature**, which this repo did not have. It catches
   two things nothing else here can: a call whose arguments do not fit the
   signature, and a call to a name the shared module does not define at all —
   both of which reach a live run as a crash on the first fetch while import,
@@ -89,9 +150,9 @@ with it, so nobody discovers it from a bill or from a diff.
 
 - **`fingerprint_client.py` could not read the key from `.env`.** `--key`
   defaulted to `os.environ.get("TWOCAPTCHA_KEY")` and only that, so a key put
-  in `.env` — exactly as §3, the README and `.env.example` instruct — worked
+  in `.env` — exactly as the README and `.env.example` instruct — worked
   for every engine and failed HERE with "No API key". A documented mechanism
-  not applied on one path, which is the shape of half the defects §16 lists.
+  not applied on one path, a common shape of defect in copied code.
 
   It now reads through `env_config.env_value`, calling `load_env()` itself
   because this is a standalone entry point that no engine has necessarily run
@@ -103,7 +164,7 @@ with it, so nobody discovers it from a bill or from a diff.
   "still set to the placeholder from .env.example" instead.
 
   Found on a sibling repo's first live `--fingerprint` run, then checked
-  across the family before patching, per §16: five repos had it and one had
+  across the family before patching: five repos had it and one had
   already fixed it. Pinned by a check verified to fail on the old code —
   including that the help string does not interpolate its default, which is
   one substring away from printing a live credential to anyone who types

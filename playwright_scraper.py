@@ -484,7 +484,7 @@ def _content_when_settled(page, attempts: int = 4, pause_ms: int = 700):
     return None
 
 
-def handle_captcha_if_present(page, args) -> bool:
+def handle_captcha_if_present(page, args, budget) -> bool:
     """Detect and solve a challenge. True if something was solved.
 
     Runs after EVERY navigation, for ANY page — not scoped to one URL. The
@@ -500,6 +500,11 @@ def handle_captcha_if_present(page, args) -> bool:
     for the account, newsletter and checkout flows where the site does use
     reCAPTCHA, and because the family's rule is that detection stays broad:
     different geos and scenarios surface different challenges.
+
+    `budget` is the page's paid-solve allowance (page_flow.SolveBudget). It
+    is required, and checked immediately before the purchase, so a page that
+    is fetched again after a refusal or from another exit cannot buy a second
+    solve.
     """
     html = _content_when_settled(page)
     if html is None:
@@ -537,6 +542,10 @@ def handle_captcha_if_present(page, args) -> bool:
         logger.warning("No 2captcha API key, so this challenge cannot be "
                        "solved — continuing with whatever the page already "
                        "holds.")
+        return False
+    if not budget.take():
+        logger.warning("This page has already used its %d paid solve(s) — "
+                       "not buying another one for it.", budget.limit)
         return False
     try:
         token = solve_recaptcha(challenge, args.twocaptcha_key,
@@ -587,15 +596,24 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
     # the same address just burns it further.
     block_retries = args.proxy_block_retries if (pool and len(pool) > 1) else 0
     html, state, load_failed = None, "ok", False
+    # One paid-solve allowance for the whole page, across every retry and
+    # every rotation below.
+    budget = page_flow.SolveBudget()
 
     for block_attempt in range(block_retries + 1):
         logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
         # Retry a navigation timeout rather than ending the run on it. One
         # network flap on page 12 of 50 should not break the loop.
         load_failed, exit_failed = False, None
+        status = None
         for attempt in range(1, args.retries + 1):
             try:
-                session.page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                response = session.page.goto(url, wait_until="domcontentloaded",
+                                             timeout=60000)
+                # The HTTP status is the strongest block signal this site
+                # gives (its refusal is its own branded page under a 403),
+                # so it goes to the classifier rather than being dropped.
+                status = response.status if response is not None else None
                 load_failed = False
                 break
             except (PWTimeout, PWError) as e:
@@ -627,13 +645,15 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if load_failed:
             break
 
-        if handle_captcha_if_present(session.page, args):
+        if handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
-            # before judging what came back.
+            # before judging what came back, and forget the status of the
+            # page the solve replaced: it describes the challenge, not this.
             session.page.wait_for_timeout(1000)
+            status = None
 
         html = _content_when_settled(session.page) or ""
-        state = _classify(session.page, html)
+        state = _classify(session.page, html, status=status)
 
         if not page_flow.should_retry(state):
             # "content" and "empty" are both final answers. An empty page is
@@ -1140,11 +1160,11 @@ def parse_args():
                         "because the flag was omitted. A search URL has no "
                         "category in its path, so pass one if you want the "
                         "column filled on a search run.")
-    p.add_argument("--pages", type=int, default=1,
+    p.add_argument("--pages", type=page_flow.pages_arg, default=1,
                    help="Number of listing pages to crawl. Ignored outside "
                         "--mode listing.")
-    p.add_argument("--delay", type=float, default=2.0, help="Delay between pages, seconds")
-    p.add_argument("--concurrency", type=int, default=1, metavar="N",
+    p.add_argument("--delay", type=page_flow.delay_arg, default=2.0, help="Delay between pages, seconds")
+    p.add_argument("--concurrency", type=page_flow.concurrency_arg, default=1, metavar="N",
                    help="Fetch pages through N parallel workers (default 1 — "
                         "unchanged sequential behaviour). Each worker runs its "
                         "own browser and holds its own proxy exit, so N>1 "
@@ -1156,7 +1176,7 @@ def parse_args():
                         "that comes back EMPTY is not retried — see "
                         "page_flow.STATE_POLICY — because an empty hub "
                         "category is a correct answer, not a fault.")
-    p.add_argument("--retry-delay", type=float, default=2.0,
+    p.add_argument("--retry-delay", type=page_flow.retry_delay_arg, default=2.0,
                    help="Seconds before the first page-load retry, doubling "
                         "thereafter (default 2.0)")
     p.add_argument("--format", choices=["json", "csv", "both"], default="both")
@@ -1182,7 +1202,7 @@ def parse_args():
     p.add_argument("--proxy-shuffle", action="store_true",
                    help="Shuffle the pool at startup, so concurrent runs do not "
                         "all begin on the first exit in the file.")
-    p.add_argument("--proxy-block-retries", type=int, default=2,
+    p.add_argument("--proxy-block-retries", type=page_flow.block_retries_arg, default=2,
                    help="When a page comes back refused (HTTP 403) or behind "
                         "a captcha, retry it from this many OTHER exits before "
                         "giving up (default 2). Needs a pool of more than one; "

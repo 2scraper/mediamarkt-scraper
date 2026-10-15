@@ -409,7 +409,9 @@ percent sign written before its number, and an instalment line in the same
 price block) — so a change in the site's markup fails a test rather than
 quietly emptying a column.
 
-`smoke_test.py`: **339 checks**, no network, no browser, no credentials.
+`python3 smoke_test.py` runs the offline suite: no network, no browser, no
+credentials. Each check prints a PASS or FAIL line, and an engine group whose
+library is not installed is reported as SKIPPED at the end.
 
 ---
 

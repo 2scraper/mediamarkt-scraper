@@ -76,7 +76,27 @@ CREDENTIAL_ALLOWED = ("USER:PASS", "user:pass", "ACCOUNT:PASSWORD", "{login}",
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")
 HEX32_ALLOWED = ("sha", "hash", "nonce", "example", "md5", "digest", "checksum")
 
-SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
+SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example",
+                    # JSON too: fixtures and run outputs are where a captured
+                    # page's front-end key would arrive.
+                    ".json")
+
+# Directory names skipped wherever they appear INSIDE the repo. Judged on the
+# path relative to the repo root, never on the absolute path: a clone that
+# happens to live under a directory called `venv` or `.venv` otherwise skips
+# every file and still prints "nothing credential-shaped".
+SKIPPED_DIRS = {".git", "__pycache__", ".venv", "venv"}
+
+
+def _is_env_backup(path):
+    """`.env.bak`, `.env.local`, `.env.save`, ... but not `.env` itself.
+
+    A renamed copy of `.env` is the classic way a key ends up one `git add -A`
+    away from a commit, and its suffix (`.bak`, `.local`) is not one the suffix
+    list would ever include. `.env` itself is the user's own config, ignored by
+    git, and is supposed to hold a key; `.env.example` is matched by suffix.
+    """
+    return path.name.startswith(".env.") and path.name != ".env.example"
 
 
 # A directory holding `pyvenv.cfg` is a virtualenv, whatever it is called.
@@ -87,7 +107,7 @@ SCANNED_SUFFIXES = (".py", ".md", ".txt", ".yml", ".yaml", ".example")
 # into pip's vendored code and flags a 32-hex string in `_elffile.py` as
 # key-shaped. Correct about the string, wrong about the file — and it is the
 # FIRST thing a new user sees from `python3 smoke_test.py`. A guard people
-# have to argue with is one they learn to suppress (CLAUDE.md §22).
+# have to argue with is one they learn to suppress.
 #
 # Deliberately NOT a narrowing of what gets scanned: an untracked file is
 # still read, because a key pasted into a scratch file beside the scripts is
@@ -116,10 +136,11 @@ def _is_in_virtualenv(path):
 
 def scanned_files():
     for path in sorted(REPO.rglob("*")):
-        if not path.is_file() or path.suffix not in SCANNED_SUFFIXES:
+        if not path.is_file():
             continue
-        if any(part in {".git", "__pycache__", ".venv", "venv"}
-               for part in path.parts):
+        if path.suffix not in SCANNED_SUFFIXES and not _is_env_backup(path):
+            continue
+        if any(part in SKIPPED_DIRS for part in path.relative_to(REPO).parts):
             continue
         if _is_in_virtualenv(path):
             continue
@@ -211,6 +232,11 @@ def secret_check():
                 failed.append(f"{rel}:{lineno} contains {match[:6]}… — a "
                               f"32-char hex string, the shape of a 2captcha key")
 
+    if not scanned:
+        # Zero files is not "clean", it is "looked at nothing". Without this a
+        # broken exclusion reports exactly what a clean repo reports.
+        failed.append("0 files scanned — the scan looked at nothing, so it "
+                      "cannot say the repo is clean")
     if not failed:
         print(f"ok       {scanned} files scanned, nothing credential-shaped")
     return failed

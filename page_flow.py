@@ -275,3 +275,85 @@ def attempts(value) -> int:
             f"With 0 the load loop never runs, nothing is fetched, and the "
             f"engine reports the browser's blank page as a result.")
     return number
+
+
+def _bounded_int(flag: str, minimum: int, why: str):
+    """An argparse `type=` that rejects integers below `minimum`, naming the flag."""
+    def parse(value) -> int:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be an integer, not {value!r}")
+        if number < minimum:
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be at least {minimum}, not {number}. {why}")
+        return number
+    parse.__name__ = flag.lstrip("-").replace("-", "_")
+    return parse
+
+
+def _non_negative_float(flag: str):
+    """An argparse `type=` for a delay in seconds: 0 or more, naming the flag."""
+    def parse(value) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be a number of seconds, not {value!r}")
+        if not number >= 0:  # also rejects NaN
+            raise _argparse.ArgumentTypeError(
+                f"{flag} must be 0 or more seconds, not {value}. "
+                f"time.sleep() raises on a negative value.")
+        return number
+    parse.__name__ = flag.lstrip("-").replace("-", "_")
+    return parse
+
+
+# A negative --pages planned no page at all and wrote nothing; a negative
+# --concurrency or --proxy-block-retries made `range()` empty; a negative
+# delay crashed in time.sleep() after page 1 had been fetched. Each is a typo
+# that deserves a usage error (exit 2) naming the flag, in every engine.
+pages_arg = _bounded_int("--pages", 1, "It is the number of listing pages to fetch.")
+concurrency_arg = _bounded_int("--concurrency", 1, "It is the number of workers.")
+block_retries_arg = _bounded_int(
+    "--proxy-block-retries", 0,
+    "It counts EXTRA exits to try after a refusal; 0 means do not rotate.")
+delay_arg = _non_negative_float("--delay")
+# scraper_api_client.py counts EXTRA attempts (each one billable), so 0 is
+# legal there and means "no retry"; only a negative value is a typo.
+extra_retries_arg = _bounded_int(
+    "--retries", 0, "Here it counts EXTRA attempts after the first; 0 means none.")
+api_retry_delay_arg = _bounded_int("--retry-delay", 0, "It is a wait in seconds.")
+retry_delay_arg = _non_negative_float("--retry-delay")
+
+
+# ---------------------------------------------------------------------------
+# Paid captcha solves: one allowance per page
+# ---------------------------------------------------------------------------
+# A solve is a purchase. Every engine checks the captcha once per fetch
+# attempt, and a refused page is fetched again from another exit up to
+# --proxy-block-retries times, so without an allowance one page could buy a
+# solve on every attempt: measured before this existed, a pool of 4 exits
+# with --proxy-block-retries 3 bought 4 solves for one page.
+SOLVES_PER_PAGE = 1
+
+
+class SolveBudget:
+    """How many paid solves one page may still buy.
+
+    Created once per page, BEFORE the block-retry loop, and passed to every
+    place that can buy a solve. It is not reset by a retry or by a rotation:
+    a fresh exit is a reason to fetch again, not a fresh allowance. The check
+    happens before the purchase, so a refused `take()` costs nothing.
+    """
+
+    def __init__(self, limit: int = SOLVES_PER_PAGE):
+        self.limit = limit
+        self.spent = 0
+
+    def take(self) -> bool:
+        if self.spent >= self.limit:
+            return False
+        self.spent += 1
+        return True
