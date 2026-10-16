@@ -13,6 +13,11 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+### Changed
+
+- CI only: the canary bills the `MEDIAMARKT_PROXY` exit, so it now runs weekly
+  (Mondays 06:23 UTC) instead of daily; a manual dispatch still runs it.
+
 ## [0.2.0] — 2026-10-16
 
 > **Behaviour changes in this batch:**
