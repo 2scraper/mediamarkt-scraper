@@ -46,9 +46,10 @@ name: canary
 # forget to uncomment.
 on:
   schedule:
-    # Once a day, off the hour, so it is not competing with everyone else's
+    # Once a week (Mondays): every run bills the MEDIAMARKT_PROXY exit. Off
+    # the hour, so it is not competing with everyone else's
     # on-the-hour cron jobs for runner availability.
-    - cron: "23 6 * * *"
+    - cron: "23 6 * * 1"
   workflow_dispatch:
 
 jobs:
