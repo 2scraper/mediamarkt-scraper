@@ -64,6 +64,7 @@ from product_parser import (parse_products, parse_product_detail,
 from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
+import proxy_pool
 from proxy_pool import (from_args as proxy_pool_from_args, mask, ROTATE_MODES,
                         ProxyError, split_credentials)
 import env_config
@@ -202,6 +203,7 @@ class _Session:
         self.bridge, self.args, self.pool = bridge, args, pool
         self.remote = bool(args.cdp_endpoint)
         self.browser = self.page = None
+        self.media_blocked = False
 
     def open(self):
         if self.remote:
@@ -251,6 +253,13 @@ class _Session:
         if credentials:
             self.bridge.run(self.page.authenticate(
                 {"username": credentials[0], "password": credentials[1]}))
+        self.media_blocked = proxy_pool.should_block_media(
+            self.args, proxy_in_use=bool(self.pool))
+        if self.media_blocked:
+            # CDP Fetch with resource-type patterns: only images, media and
+            # fonts are paused, and each is failed. page.setRequestInterception
+            # relies on a CDP method current Chromium no longer implements.
+            self.bridge.run(proxy_pool.pyppeteer_block_media(self.page))
         return self
 
     def relaunch(self):
@@ -643,10 +652,18 @@ def scrape(args) -> int:
                        "which is the primary engine. Running one page at a "
                        "time.")
 
+    # Before any browser exists: a proxy that refuses its credential (407) or
+    # has no traffic left (402) would refuse every request the browser makes.
+    stop = page_flow.proxy_precheck(args, pool.current if pool else None)
+    if stop is not None:
+        return stop
+    media_blocked = False
+
     bridge = _AsyncBridge()
     session = None
     try:
         session = _Session(bridge, args, pool).open()
+        media_blocked = session.media_blocked
         first = _fetch_one_page(session, args, pool, 1, args.url)
         outcomes.append(first)
 
@@ -756,7 +773,8 @@ def scrape(args) -> int:
                       pages_requested=args.pages, pages_completed=len(ok_pages),
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
-                      start_url=args.url, final_url=final_url)
+                      start_url=args.url, final_url=final_url,
+                      extra={"media_blocked": media_blocked})
 
 
 def parse_args():
@@ -823,6 +841,7 @@ def parse_args():
                         "code at all, so it is the build, not this engine). "
                         "Point it at a Chrome or Chromium of your own — "
                         "Playwright's, if you have it installed.")
+    page_flow.add_media_flags(p)
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args()

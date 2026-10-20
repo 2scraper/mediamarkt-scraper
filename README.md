@@ -335,6 +335,58 @@ this site an address that works is one worth not burning), and it is refused
 outright with `--cdp-endpoint`, because a Scraping Browser profile allows one
 live connection — several `pid`s, one run each, is the way.
 
+### Traffic through a paid proxy
+
+A residential proxy bills per byte, so two things happen only while a LOCAL
+browser goes through `--proxy` / `--proxy-file` (or `MEDIAMARKT_PROXY`).
+Neither applies with `--cdp-endpoint`: that remote browser brings its own exit
+and is billed on its own side. Neither applies with no proxy either, because
+then nothing is metered.
+
+**Pre-check before the browser starts.** All three engines send ONE
+`HEAD https://<start host>/robots.txt` through the proxy (for a `.de` URL,
+`https://www.mediamarkt.de/robots.txt`) before launching a browser:
+
+- `407`: the gateway refused the credential, or the traffic balance is
+  exhausted. Exit `5`.
+- `402`: the proxy's traffic or balance is exhausted. Exit `5`.
+
+The message names `MEDIAMARKT_PROXY` and never prints its value. The run
+writes `<out>.latest_attempt.meta.json` with `status: failed` and
+`stop_reason: proxy_auth_failed`. The data files and `<out>.meta.json` from
+an earlier run are left exactly as they were. Any other answer (a `200`, the
+site's own `403`, a timeout, a DNS error) is not a verdict on the proxy, and
+the run carries on exactly as before. With `--proxy-file` the first exit of the
+pool is the one checked. The pre-check is a single request and is never
+retried or rotated. The canary's own proxy check
+(`.github/canary_preflight.py`) classifies a `407`/`402` with the same code and
+the same wording.
+
+**Media is not downloaded.** Images, video/audio and web fonts are aborted:
+
+| Engine | How | What still loads |
+|---|---|---|
+| Playwright | `context.route` by resource type | nothing of those three types |
+| pyppeteer | CDP `Fetch.enable` with resource-type patterns, then `Fetch.failRequest` | nothing of those three types |
+| Selenium | CDP `Network.setBlockedURLs` by file extension | an image or font served from a URL **without** an extension |
+
+`--load-media` keeps them. The parser reads markup and structured data only:
+`image_url` comes from the page's JSON-LD or from the tile's `src` /
+`data-src` attribute, and nothing reads image bytes, image dimensions or
+load events. Two side effects to know about: a debug screenshot taken behind
+a proxy shows no images, and Playwright switches its HTTP cache off while a
+route is installed, so repeated assets in one run are fetched again (scripts
+and stylesheets, which are not blocked). `<out>.meta.json` records
+`media_blocked`.
+
+Live comparison, 2026-10-20: one category page through Playwright with no
+proxy, once as it is and once with blocking forced on, to compare the rows.
+It was not possible from this datacentre address: both runs got the site's
+`403` refusal page, as every datacentre address does (see above). The
+verification is therefore offline: the fixtures, the reading of the parser
+above, and each real browser driven against a local test page. With blocking,
+only the HTML and the script were fetched, and the script still ran.
+
 ---
 
 ## Exit codes
@@ -346,14 +398,17 @@ live connection — several `pid`s, one run each, is the way.
 | `2` | Bad usage (including a URL that is not a MediaMarkt host) |
 | `3` | Blocked — the 403 refusal, or a challenge |
 | `4` | Zero products — including a hub category, which is a correct answer |
-| `5` | The content was never obtained — a remote API error, a navigation timeout, a dead or unauthenticated proxy. Nothing was written |
+| `5` | The content was never obtained — a remote API error, a navigation timeout, a dead or unauthenticated proxy (a gateway `407`/`402` at the pre-check stops here before a browser starts). No data was written |
 | `6` | Partial — some pages fetched, then stopped early |
 
 **A run that finds nothing writes nothing.** Last night's good output is not
 replaced with `[]`; `--allow-empty` is the opt-out. A consumer cannot tell an
 empty category from a failed run, and the failure destroys the last known
-good data. A failed run writes no sidecar either, because a `"failed"`
-sidecar beside good data would contradict it.
+good data. A failed run writes no `<out>.meta.json` either, because a
+`"failed"` sidecar beside good data would contradict it. The one exception is
+a proxy refused at the pre-check (see *Traffic through a paid proxy*): that run
+records itself in `<out>.latest_attempt.meta.json`, a separate file, and
+leaves `<out>.meta.json` alone.
 
 `<out>.meta.json` records `status`, `stop_reason`, `mode`, `source` and
 **which** pages failed by number — a count stops being a description once a
@@ -413,8 +468,8 @@ percent sign written before its number, and an instalment line in the same
 price block) — so a change in the site's markup fails a test rather than
 quietly emptying a column.
 
-`python3 smoke_test.py` runs the offline suite: no network, no browser, no
-credentials. Each check prints a PASS or FAIL line, and an engine group whose
+`python3 smoke_test.py` runs the offline suite: no network beyond stub
+servers on `127.0.0.1`, no browser, no credentials. Each check prints a PASS or FAIL line, and an engine group whose
 library is not installed is reported as SKIPPED at the end.
 
 ---

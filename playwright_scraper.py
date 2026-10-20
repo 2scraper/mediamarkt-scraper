@@ -74,6 +74,7 @@ from product_parser import (parse_products, parse_product_detail,
 from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
+import proxy_pool
 from proxy_pool import (from_args as proxy_pool_from_args, to_playwright, mask,
                         ROTATE_MODES, ProxyError, ProxyPool)
 import env_config
@@ -317,6 +318,10 @@ def _launch_local(pw, args, pool):
     if init_script:
         # Must be installed on the context, before any page script runs.
         context.add_init_script(init_script)
+    if proxy_pool.should_block_media(args, proxy_in_use=bool(proxy)):
+        # Images, video and fonts through a metered proxy, read by no parser
+        # here. On the context, so every page and every relaunch gets it.
+        context.route("**/*", proxy_pool.playwright_media_route)
     return browser, context, context.new_page()
 
 
@@ -333,6 +338,7 @@ class _BrowserSession:
     def __init__(self, pw, args, pool, remote: bool = False):
         self.pw, self.args, self.pool, self.remote = pw, args, pool, remote
         self.browser = self.context = self.page = None
+        self.media_blocked = False
 
     def open(self):
         if self.remote:
@@ -340,6 +346,10 @@ class _BrowserSession:
         else:
             self.browser, self.context, self.page = _launch_local(
                 self.pw, self.args, self.pool)
+            # The same decision _launch_local just acted on (a proxy is in
+            # use exactly when the pool is), recorded for the sidecar.
+            self.media_blocked = proxy_pool.should_block_media(
+                self.args, proxy_in_use=bool(self.pool))
         return self
 
     def relaunch(self):
@@ -984,9 +994,17 @@ def scrape(args) -> int:
                            "(~150-300MB each). Make sure the machine has the "
                            "memory for it.", concurrency, concurrency)
 
+    # Before any browser exists: a proxy that refuses its credential (407) or
+    # has no traffic left (402) would refuse every request the browser makes.
+    stop = page_flow.proxy_precheck(args, pool.current if pool else None)
+    if stop is not None:
+        return stop
+    media_blocked = False
+
     with sync_playwright() as pw:
         session = _BrowserSession(pw, args, pool,
                                   remote=bool(args.cdp_endpoint)).open()
+        media_blocked = session.media_blocked
         try:
             # Page 1 is always fetched on its own: its content is what decides
             # whether pages 2..N can be addressed independently at all.
@@ -1135,7 +1153,8 @@ def scrape(args) -> int:
                       pages_requested=args.pages, pages_completed=len(ok_pages),
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
-                      start_url=args.url, final_url=final_url)
+                      start_url=args.url, final_url=final_url,
+                      extra={"media_blocked": media_blocked})
 
 
 def parse_args():
@@ -1267,6 +1286,7 @@ def parse_args():
                    help="Save the exact HTML the parser is given, on success as "
                         "well as failure. Useful when the row count is right but "
                         "a column comes back empty — see TROUBLESHOOTING.md.")
+    page_flow.add_media_flags(p)
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args()

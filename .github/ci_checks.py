@@ -70,7 +70,9 @@ CREDENTIAL_ALLOWED = ("USER:PASS", "user:pass", "ACCOUNT:PASSWORD", "{login}",
                       "user:secret@",                  # the masking fixtures
                       "login:password@host:port",      # a refusal message
                       "u:supersecret@", "login:supersecret@",
-                      "u:pass@h1", "u:pass@h2")
+                      "u:pass@h1", "u:pass@h2",
+                      # the proxy pre-check checks, against a local stub
+                      "user:S3cretPw@127.0.0.1", "u:p@127.0.0.1")
 
 # A 2captcha API key is a 32-character hex string.
 HEX32 = re.compile(r"\b[0-9a-f]{32}\b")

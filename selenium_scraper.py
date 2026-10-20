@@ -67,6 +67,7 @@ from product_parser import (parse_products, parse_product_detail,
 from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
+import proxy_pool
 from proxy_pool import (from_args as proxy_pool_from_args, mask, ROTATE_MODES,
                         ProxyError, split_credentials)
 import env_config
@@ -174,6 +175,7 @@ class _Session:
         self.args, self.pool = args, pool
         self.remote = bool(args.cdp_endpoint)
         self.driver = None
+        self.media_blocked = False
 
     def open(self):
         options = Options()
@@ -214,6 +216,16 @@ class _Session:
 
         self.driver = webdriver.Chrome(options=options)
         self._apply_timeouts()
+        self.media_blocked = False
+        if proxy_pool.should_block_media(self.args, proxy_in_use=bool(self.pool)):
+            # By URL pattern (Selenium has no request events): an image
+            # served without a file extension still loads.
+            try:
+                proxy_pool.selenium_block_media(self.driver)
+                self.media_blocked = True
+            except WebDriverException as e:
+                logger.warning("Could not block media over CDP (%s) — loading "
+                               "it.", _mask_credentials(str(e))[:200])
 
         version = self.driver.capabilities.get("browserVersion", "")
         if version:
@@ -656,9 +668,19 @@ def scrape(args) -> int:
                        "which is the primary engine. Running one page at a "
                        "time.")
 
+    # Before any browser exists: a proxy that refuses its credential (407) or
+    # has no traffic left (402) would refuse every request the browser makes.
+    # Checked with the URL as configured, credentials included: the question
+    # is whether the proxy account itself is refused or exhausted.
+    stop = page_flow.proxy_precheck(args, pool.current if pool else None)
+    if stop is not None:
+        return stop
+    media_blocked = False
+
     session = None
     try:
         session = _Session(args, pool).open()
+        media_blocked = session.media_blocked
         first = _fetch_one_page(session, args, pool, 1, args.url)
         outcomes.append(first)
 
@@ -765,7 +787,8 @@ def scrape(args) -> int:
                       pages_requested=args.pages, pages_completed=len(ok_pages),
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
-                      start_url=args.url, final_url=final_url)
+                      start_url=args.url, final_url=final_url,
+                      extra={"media_blocked": media_blocked})
 
 
 def parse_args():
@@ -844,6 +867,7 @@ def parse_args():
     p.add_argument("--dump-html", default=None, metavar="PATH",
                    help="Save the exact HTML the parser is given, on success "
                         "as well as failure.")
+    page_flow.add_media_flags(p)
     p.add_argument("--headless", action="store_true", default=True)
     p.add_argument("--headful", dest="headless", action="store_false")
     args = p.parse_args()

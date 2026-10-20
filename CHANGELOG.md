@@ -13,6 +13,29 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ## [Unreleased]
 
+> **Behaviour changes.**
+> * Behind `--proxy` / `--proxy-file`, all three browser engines send one
+>   `HEAD` for the start host's `robots.txt` through the proxy before
+>   launching a browser. A gateway `407` (credential refused, or traffic
+>   exhausted) or `402` (traffic/balance exhausted) now ends the run with exit
+>   5 and `stop_reason: proxy_auth_failed` in the new
+>   `<out>.latest_attempt.meta.json`. No browser is started, and the data and
+>   `<out>.meta.json` are left as they were. Any other answer, or a transport
+>   error, leaves the run as it was. Not sent with `--cdp-endpoint` or
+>   without a proxy.
+> * Behind a local proxy, images, video/audio and web fonts are no longer
+>   downloaded: Playwright and pyppeteer abort them by resource type, and
+>   Selenium blocks them by URL extension. `--load-media` restores the old
+>   behaviour. Nothing changes with `--cdp-endpoint` or with no proxy.
+>   `<out>.meta.json` records `media_blocked`.
+
+### Added
+
+- `--load-media` in all three engines.
+- `.github/canary_preflight.py` classifies a gateway `402` as well as a
+  `407`, from the CONNECT reply or from a plain-HTTP answer, in the same
+  wording as the engines' pre-check.
+
 ### Changed
 
 - CI only: the canary bills the `MEDIAMARKT_PROXY` exit, so it now runs weekly
