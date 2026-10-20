@@ -2884,6 +2884,335 @@ def test_numeric_flags_are_validated():
     return ok
 
 
+# ---------------------------------------------------------------------------
+# Traffic savers: the proxy pre-check and media blocking
+# ---------------------------------------------------------------------------
+def _status_proxy(status):
+    """A local stand-in for a proxy gateway that answers every request,
+    CONNECT included, with `status`. Returns (server, port, hits)."""
+    import http.server
+    import socketserver
+    hits = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def _answer(self):
+            hits.append((self.command, self.path))
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.send_header("Proxy-Authenticate", 'Basic realm="stub"')
+            self.end_headers()
+        do_CONNECT = do_GET = do_HEAD = _answer
+
+    server = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler)
+    server.daemon_threads = True
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, server.server_address[1], hits
+
+
+class _BrowserStarted(Exception):
+    """Raised by a patched browser launch: the run got past the pre-check."""
+
+
+def _engine_args(module, argv):
+    """`module.parse_args()` on `argv`, with no MEDIAMARKT_* from the shell."""
+    from unittest import mock
+    clean = {k: v for k, v in os.environ.items() if not k.startswith("MEDIAMARKT_")}
+    with mock.patch.dict(os.environ, clean, clear=True), \
+            mock.patch.object(sys, "argv", [module.__name__ + ".py"] + argv):
+        return module.parse_args()
+
+
+def _patch_browser_start(module):
+    """Patch the engine's first browser-launching call to raise _BrowserStarted."""
+    from unittest import mock
+
+    def started(*a, **k):
+        raise _BrowserStarted()
+    if module.__name__ == "playwright_scraper":
+        return mock.patch.object(module, "sync_playwright", started)
+    return mock.patch.object(module._Session, "open", started)
+
+
+def _run_quiet(fn, *a):
+    out, err = io.StringIO(), io.StringIO()
+    from contextlib import redirect_stderr
+    with redirect_stdout(out), redirect_stderr(err):
+        result = fn(*a)
+    return result, out.getvalue() + err.getvalue()
+
+
+def test_proxy_traffic_savers(skips):
+    group("traffic savers: proxy pre-check before the browser, media blocking")
+    ok = True
+    import argparse as _ap
+    import logging as _logging
+    import proxy_pool
+    from unittest import mock
+    from output_writer import ATTEMPT_META_SUFFIX
+    url = "https://www.mediamarkt.de/de/category/k%C3%BChlen-gefrieren-32.html"
+    ns = _ap.Namespace
+
+    # --- the shared pre-check, through page_flow -------------------------
+    for status, words in ((407, "refused the credential"), (402, "balance exhausted")):
+        server, port, hits = _status_proxy(status)
+        tmp = tempfile.mkdtemp()
+        prefix = os.path.join(tmp, "run")
+        # A previous good run: the pre-check must leave all of it alone.
+        for suffix, body in ((".json", "[1]"), (".csv", "sku\n1\n"),
+                             (".meta.json", '{"status": "complete"}')):
+            with open(prefix + suffix, "w") as f:
+                f.write(body)
+        proxy = "http://user:S3cretPw@127.0.0.1:%d" % port
+        args = ns(url=url, out=prefix, mode="listing", pages=3, cdp_endpoint=None)
+        try:
+            rc, text = _run_quiet(page_flow.proxy_precheck, args, proxy)
+        finally:
+            server.shutdown()
+            server.server_close()
+        ok &= check("pre-check: a proxy %d exits 5" % status, rc == 5)
+        ok &= check("pre-check: ...after ONE request, a CONNECT to the start host (%d)"
+                    % status, hits == [("CONNECT", "www.mediamarkt.de:443")])
+        ok &= check("pre-check: ...says why and names MEDIAMARKT_PROXY (%d)" % status,
+                    words in text and "MEDIAMARKT_PROXY" in text)
+        ok &= check("pre-check: ...and never prints the credential (%d)" % status,
+                    "S3cretPw" not in text)
+        meta_path = prefix + ATTEMPT_META_SUFFIX
+        meta = json.load(open(meta_path)) if os.path.exists(meta_path) else {}
+        ok &= check("pre-check: ...attempt sidecar says failed/proxy_auth_failed (%d)" % status,
+                    (meta.get("status"), meta.get("stop_reason"), meta.get("data_updated"),
+                     meta.get("products"), meta.get("source"))
+                    == ("failed", "proxy_auth_failed", False, 0, "mediamarkt.de"))
+        ok &= check("pre-check: ...and the credential is not in it (%d)" % status,
+                    "S3cretPw" not in json.dumps(meta))
+        kept = {s: open(prefix + s).read() for s in (".json", ".csv", ".meta.json")}
+        ok &= check("pre-check: ...earlier data and .meta.json untouched (%d)" % status,
+                    kept == {".json": "[1]", ".csv": "sku\n1\n",
+                             ".meta.json": '{"status": "complete"}'})
+        ok &= check("pre-check: ...and nothing else written (%d)" % status,
+                    sorted(os.listdir(tmp)) == sorted(
+                        ["run.json", "run.csv", "run.meta.json", "run" + ATTEMPT_META_SUFFIX]))
+    # Not a gateway verdict: the run goes on exactly as before.
+    server, port, hits = _status_proxy(403)
+    try:
+        got = page_flow.proxy_precheck(
+            ns(url=url, out=tempfile.mkdtemp() + "/r", mode="listing", pages=1,
+               cdp_endpoint=None), "http://u:p@127.0.0.1:%d" % port)
+    finally:
+        server.shutdown()
+        server.server_close()
+    ok &= check("pre-check: a 403 through the tunnel is not a proxy failure",
+                got is None and len(hits) == 1)
+    ok &= check("pre-check: an unreachable proxy is not a proxy failure",
+                proxy_pool.precheck_proxy("http://u:p@127.0.0.1:1",
+                                          "https://x.invalid/robots.txt", 3) is None)
+    with mock.patch.object(proxy_pool, "precheck_proxy",
+                           side_effect=AssertionError("pre-check sent")):
+        none_args = ns(url=url, out="x", mode="listing", pages=1, cdp_endpoint=None)
+        ok &= check("pre-check: no proxy, no request",
+                    page_flow.proxy_precheck(none_args, None) is None)
+        cdp_args = ns(url=url, out="x", mode="listing", pages=1,
+                      cdp_endpoint="ws://127.0.0.1:1")
+        ok &= check("pre-check: never over --cdp-endpoint",
+                    page_flow.proxy_precheck(cdp_args, "http://u:p@h:1") is None)
+    ok &= check("pre-check: the probe is the start host's robots.txt",
+                proxy_pool.robots_url(url) == "https://www.mediamarkt.de/robots.txt")
+
+    # --- each engine stops before its browser starts ---------------------
+    loaded = {}
+    for name in ENGINES:
+        try:
+            loaded[name] = __import__(name)
+        except ImportError as e:
+            skips.append("traffic savers, %s (%s)" % (name, e))
+    for name, mod in loaded.items():
+        for status in (407, 402):
+            server, port, hits = _status_proxy(status)
+            tmp = tempfile.mkdtemp()
+            try:
+                args = _engine_args(mod, ["--url", url, "--out", tmp + "/r", "--proxy",
+                                          "http://user:S3cretPw@127.0.0.1:%d" % port])
+                with _patch_browser_start(mod):
+                    try:
+                        rc, text = _run_quiet(mod.scrape, args)
+                    except _BrowserStarted:
+                        rc, text = "browser started", ""
+            finally:
+                server.shutdown()
+                server.server_close()
+            ok &= check("%s: a proxy %d exits 5 before a browser is started"
+                        % (name, status), rc == 5 and len(hits) == 1)
+            ok &= check("%s: ...without printing the credential (%d)" % (name, status),
+                        "S3cretPw" not in text)
+            ok &= check("%s: ...writing only the attempt sidecar (%d)" % (name, status),
+                        os.listdir(tmp) == ["r" + ATTEMPT_META_SUFFIX])
+        server, port, hits = _status_proxy(403)
+        try:
+            args = _engine_args(mod, ["--url", url, "--out", tempfile.mkdtemp() + "/r",
+                                      "--proxy", "http://u:p@127.0.0.1:%d" % port])
+            with _patch_browser_start(mod):
+                try:
+                    _run_quiet(mod.scrape, args)
+                    reached = False
+                except _BrowserStarted:
+                    reached = True
+        finally:
+            server.shutdown()
+            server.server_close()
+        ok &= check("%s: a site 403 at the pre-check still starts the browser" % name,
+                    reached)
+        with mock.patch.object(proxy_pool, "precheck_proxy",
+                               side_effect=AssertionError("pre-check over CDP")):
+            args = _engine_args(mod, ["--url", url, "--out", tempfile.mkdtemp() + "/r",
+                                      "--cdp-endpoint", "ws://127.0.0.1:1",
+                                      "--proxy", "http://u:p@127.0.0.1:1"])
+            _logging.disable(_logging.WARNING)
+            try:
+                with _patch_browser_start(mod):
+                    try:
+                        _run_quiet(mod.scrape, args)
+                        reached = False
+                    except _BrowserStarted:
+                        reached = True
+            finally:
+                _logging.disable(_logging.NOTSET)
+        ok &= check("%s: no pre-check over --cdp-endpoint" % name, reached)
+        helptext = io.StringIO()
+        with redirect_stdout(helptext):
+            try:
+                _engine_args(mod, ["--help"])
+            except SystemExit:
+                pass
+        ok &= check("%s: --load-media is in --help, --force-block-media is not" % name,
+                    "--load-media" in helptext.getvalue()
+                    and "--force-block-media" not in helptext.getvalue())
+        args = _engine_args(mod, ["--url", url])
+        ok &= check("%s: media flags default off" % name,
+                    args.load_media is False and args.force_block_media is False)
+
+    # --- media policy -----------------------------------------------------
+    ok &= check("media: blocked behind a local proxy",
+                proxy_pool.should_block_media(ns(load_media=False), proxy_in_use=True))
+    ok &= check("media: --load-media keeps it",
+                not proxy_pool.should_block_media(ns(load_media=True), proxy_in_use=True))
+    ok &= check("media: no proxy, nothing metered, nothing blocked",
+                not proxy_pool.should_block_media(ns(load_media=False), proxy_in_use=False))
+    ok &= check("media: never over CDP",
+                not proxy_pool.should_block_media(ns(load_media=False), proxy_in_use=True,
+                                                  over_cdp=True))
+    ok &= check("media: the hidden switch forces it without a proxy",
+                proxy_pool.should_block_media(ns(load_media=False, force_block_media=True),
+                                              proxy_in_use=False))
+
+    class Route:
+        def __init__(self, kind):
+            self.request = ns(resource_type=kind)
+            self.done = None
+
+        def abort(self, reason=None):
+            self.done = "abort"
+
+        def continue_(self):
+            self.done = "continue"
+    for kind, want in (("image", "abort"), ("media", "abort"), ("font", "abort"),
+                       ("document", "continue"), ("script", "continue"),
+                       ("xhr", "continue"), ("fetch", "continue"),
+                       ("stylesheet", "continue")):
+        route = Route(kind)
+        proxy_pool.playwright_media_route(route)
+        ok &= check("media: playwright %s -> %s" % (kind, want), route.done == want)
+
+    class Sel:
+        def __init__(self):
+            self.sent = []
+
+        def execute_cdp_cmd(self, cmd, params):
+            self.sent.append((cmd, params))
+    sel = Sel()
+    proxy_pool.selenium_block_media(sel)
+    blocked = dict(sel.sent).get("Network.setBlockedURLs", {}).get("urls", [])
+    ok &= check("media: selenium blocks images, video and fonts by URL, not js/css",
+                all(p in blocked for p in ("*.jpg", "*.webp?*", "*.mp4", "*.woff2"))
+                and not any(p.startswith(("*.js", "*.css")) for p in blocked))
+
+    import asyncio
+
+    class Client:
+        def __init__(self):
+            self.sent, self.handlers = [], {}
+
+        def on(self, name, fn):
+            self.handlers[name] = fn
+
+        async def send(self, cmd, params=None):
+            self.sent.append((cmd, params))
+    client = Client()
+
+    async def create():
+        return client
+    fake_page = ns(target=ns(createCDPSession=create))
+    loop = asyncio.new_event_loop()
+    try:
+        async def drive():
+            await proxy_pool.pyppeteer_block_media(fake_page)
+            client.handlers["Fetch.requestPaused"]({"requestId": "r1", "resourceType": "Image"})
+            await asyncio.sleep(0)
+        loop.run_until_complete(drive())
+    finally:
+        loop.close()
+    patterns = (dict(client.sent).get("Fetch.enable") or {}).get("patterns", [])
+    ok &= check("media: pyppeteer pauses only images, media and fonts",
+                sorted(p["resourceType"] for p in patterns) == ["Font", "Image", "Media"])
+    ok &= check("media: ...and fails what it paused",
+                client.sent[-1] == ("Fetch.failRequest",
+                                    {"requestId": "r1", "errorReason": "BlockedByClient"}))
+    # Every local-browser engine consults the policy and applies its blocker,
+    # and records the outcome. A source check, because the offline suite has
+    # no browser binary.
+    for module, call in (("playwright_scraper", "playwright_media_route"),
+                         ("selenium_scraper", "selenium_block_media"),
+                         ("puppeteer_scraper", "pyppeteer_block_media")):
+        src = open(os.path.join(REPO_ROOT, module + ".py"), encoding="utf-8").read()
+        ok &= check("media: %s applies the policy" % module,
+                    "should_block_media(" in src and "proxy_pool.%s" % call in src)
+        ok &= check("media: %s records media_blocked in the sidecar" % module,
+                    'extra={"media_blocked": media_blocked}' in src)
+        ok &= check("%s: pre-checks the proxy before the browser" % module,
+                    "page_flow.proxy_precheck(args," in src)
+        ok &= check("%s: offers the media flags" % module,
+                    "page_flow.add_media_flags(p)" in src)
+    parser = _ap.ArgumentParser()
+    page_flow.add_media_flags(parser)
+    ok &= check("media: the shared flags document --load-media and hide the switch",
+                "--load-media" in parser.format_help()
+                and "--force-block-media" not in parser.format_help())
+
+    # --- the canary's own proxy check uses the same classification --------
+    for status, words in ((407, "refused the credential"), (402, "balance exhausted")):
+        for target in ("https://www.mediamarkt.de/robots.txt",
+                       "http://www.mediamarkt.de/robots.txt"):
+            server, port, hits = _status_proxy(status)
+            env = {k: v for k, v in os.environ.items() if not k.startswith("MEDIAMARKT_")}
+            env.update(MEDIAMARKT_PROXY="http://user:S3cretPw@127.0.0.1:%d" % port,
+                       CANARY_URL=target, PREFLIGHT_CONNECT_TIMEOUT="5",
+                       PREFLIGHT_READ_TIMEOUT="5", PYTHONDONTWRITEBYTECODE="1")
+            try:
+                res = subprocess.run([sys.executable,
+                                      os.path.join(REPO_ROOT, ".github", "canary_preflight.py")],
+                                     capture_output=True, text=True, timeout=60, env=env)
+            finally:
+                server.shutdown()
+                server.server_close()
+            out = res.stdout + res.stderr
+            ok &= check("canary preflight: a %d via %s fails, in the pre-check's words"
+                        % (status, target.split(":")[0]),
+                        res.returncode == 1 and "::error::" in out and words in out
+                        and "MEDIAMARKT_PROXY" in out and "S3cretPw" not in out)
+    return ok
+
+
 def test_no_private_citations():
     group("public files cite no private instruction file")
     ok = True
@@ -2966,6 +3295,7 @@ def main() -> int:
     ok &= test_status_reaches_the_classifier()
     ok &= test_numeric_flags_are_validated()
     ok &= test_no_private_citations()
+    ok &= test_proxy_traffic_savers(skips)
 
     print()
     if _failures:

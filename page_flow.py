@@ -366,3 +366,62 @@ class SolveBudget:
             return False
         self.spent += 1
         return True
+
+
+# ---------------------------------------------------------------------------
+# Traffic savers behind a paid proxy (the helpers are in proxy_pool.py)
+# ---------------------------------------------------------------------------
+# One HEAD for the start host's robots.txt, through the proxy, before a local
+# browser is launched. Short on purpose: a slow answer is not a verdict, and
+# the browser run then goes ahead exactly as it did before.
+PROXY_PRECHECK_TIMEOUT = 20.0
+
+
+def proxy_precheck(args, proxy_url: Optional[str]) -> Optional[int]:
+    """Pre-check `proxy_url`; return the exit code to stop with, or None.
+
+    A gateway 407 or 402 prints why (naming MEDIAMARKT_PROXY, never its
+    value), writes `<out>.latest_attempt.meta.json` with status `failed` and
+    stop_reason `proxy_auth_failed`, leaves the data and `<out>.meta.json`
+    untouched, and returns exit 5. Not sent over --cdp-endpoint (that browser
+    has its own exit) or without a proxy. Anything else — a 200, a 403 from
+    the site, a timeout — returns None and the run carries on unchanged.
+    """
+    import sys
+    import output_writer
+    import proxy_pool
+    from product_parser import site_host
+    if not proxy_url or getattr(args, "cdp_endpoint", None):
+        return None
+    try:
+        proxy_pool.precheck_proxy(proxy_url, proxy_pool.robots_url(args.url),
+                                  timeout=PROXY_PRECHECK_TIMEOUT)
+    except proxy_pool.ProxyPrecheckError as exc:
+        host = site_host(args.url) or output_writer.SOURCE_DEFAULT
+        print(proxy_pool.precheck_message(exc, "MEDIAMARKT_PROXY", host),
+              file=sys.stderr)
+        try:
+            output_writer.write_failed_attempt(
+                args.out, stop_reason=proxy_pool.PROXY_PRECHECK_STOP_REASON,
+                mode=args.mode, start_url=args.url, pages_requested=args.pages,
+                transport_error="proxy pre-check: %s" % exc, source=host)
+        except OSError as write_exc:
+            # The verdict stands without its record: still exit 5, not a crash.
+            print("[!] could not write the attempt metadata: %s" % write_exc,
+                  file=sys.stderr)
+        return output_writer.EXIT_FETCH_FAILED
+    return None
+
+
+def add_media_flags(parser) -> None:
+    """`--load-media` (documented) and the hidden `--force-block-media`."""
+    parser.add_argument(
+        "--load-media", action="store_true",
+        help="Load images, video and web fonts. By default they are aborted "
+             "while a local browser goes through --proxy / --proxy-file (no "
+             "parser here reads them, and a proxy bills per byte); nothing is "
+             "blocked with --cdp-endpoint or with no proxy.")
+    # Turns blocking on without a proxy, so its effect on parsing can be
+    # measured for free. Not a user feature.
+    parser.add_argument("--force-block-media", action="store_true",
+                        help=_argparse.SUPPRESS)

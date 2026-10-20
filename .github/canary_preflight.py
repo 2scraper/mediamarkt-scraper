@@ -22,6 +22,11 @@ Exit codes:
 A 403 from the site through the proxy is reported as a warning and exits 0:
 the browser run is the real test of whether the exit is accepted, and a
 plain HTTP client is a weaker witness than a browser.
+
+A gateway 407 (credential refused) or 402 (traffic/balance exhausted) is
+classified by the same code and worded the same way as the engines' own
+pre-check (`proxy_pool.precheck_proxy`), so the canary and a user's run name
+one failure identically.
 """
 
 import os
@@ -29,6 +34,9 @@ import re
 import socket
 import sys
 from urllib.parse import urlparse
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import proxy_pool  # noqa: E402  (the repository root, one level up)
 
 TARGET = os.environ.get(
     "CANARY_URL",
@@ -99,10 +107,9 @@ def main():
                          allow_redirects=True)
     except requests.exceptions.ProxyError as e:
         text = str(e)
-        if "407" in text:
-            error(f"The proxy {where(proxy)} rejected the credentials (HTTP "
-                  f"407). The login or password in MEDIAMARKT_PROXY is wrong "
-                  f"or has expired: replace the secret.")
+        refused = proxy_pool._STATUS_IN_ERROR_RE.search(text)
+        if refused:
+            _gateway_refused(proxy, int(refused.group(1)))
         else:
             error(f"The proxy {where(proxy)} accepted the connection but would "
                   f"not open a tunnel to the site ({_short(text)}). This is "
@@ -123,6 +130,10 @@ def main():
               f"{type(e).__name__}: {_short(str(e))}")
         return 1
 
+    if r.status_code in proxy_pool.PROXY_PRECHECK_STATUSES:
+        # A plain http:// target: the gateway answers the request itself.
+        _gateway_refused(proxy, r.status_code)
+        return 1
     final_host = urlparse(r.url).hostname or ""
     print(f"site answered HTTP {r.status_code}, {len(r.content)} bytes, "
           f"final host {final_host}")
@@ -137,6 +148,14 @@ def main():
         print(f"::warning::The request was redirected to {final_host}: the exit "
               f"is not in Germany, and the canary's source check will fail.")
     return 0
+
+
+def _gateway_refused(proxy, status):
+    """The gateway's own 407/402, in the engines' pre-check wording."""
+    message = proxy_pool.precheck_message(
+        proxy_pool.ProxyPrecheckError(status), "MEDIAMARKT_PROXY", "mediamarkt.de")
+    error(f"The proxy {where(proxy)}: " + " ".join(message.split()) +
+          " Replace the secret.")
 
 
 def _short(text):

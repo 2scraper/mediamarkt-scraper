@@ -401,6 +401,35 @@ def write_run_meta(out_prefix: str, meta: dict) -> str:
     return path
 
 
+# A run that stopped before it fetched anything — the proxy refused its
+# credential at the pre-check — has no dataset to describe, and
+# `<out>.meta.json` must keep describing the data still beside it. What
+# happened to THIS attempt goes into its own file instead.
+ATTEMPT_META_SUFFIX = ".latest_attempt.meta.json"
+
+
+def write_failed_attempt(out_prefix: str, *, stop_reason: str, mode: str,
+                         start_url: Optional[str], pages_requested: int,
+                         transport_error: str,
+                         source: str = SOURCE_DEFAULT) -> str:
+    """Record an attempt that ended before `finish_run` could run.
+
+    Only `<out>.latest_attempt.meta.json` is written; the data files and
+    `<out>.meta.json` are left exactly as they were.
+    """
+    meta = run_meta(status="failed", stop_reason=stop_reason,
+                    pages_requested=pages_requested, pages_completed=0,
+                    start_url=start_url, final_url=start_url, products=0,
+                    mode=mode, source=source)
+    meta.update(blocked=False, transport_error=transport_error,
+                data_updated=False)
+    path = f"{out_prefix}{ATTEMPT_META_SUFFIX}"
+    with _atomic(path) as f:
+        json.dump(meta, f, ensure_ascii=False, indent=2)
+    print(f"[+] Wrote attempt metadata -> {path} (status=failed)")
+    return path
+
+
 def run_meta(status: str, stop_reason: str, pages_requested: int,
              pages_completed: int, start_url: str, final_url: str,
              products: int, pages_failed: Optional[List[int]] = None,
