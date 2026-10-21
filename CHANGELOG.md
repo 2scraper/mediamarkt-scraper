@@ -60,6 +60,10 @@ with it, so nobody discovers it from a bill or from a diff.
 - CI only: the canary bills the `MEDIAMARKT_PROXY` exit, so it now runs weekly
   (Mondays 06:23 UTC) instead of daily; a manual dispatch still runs it.
 
+### Fixed
+
+- Proxy traffic meter: Selenium and Puppeteer no longer count requests that never leave the browser. Chrome's new-tab page loads `chrome://` scripts (about 2.8 MB, seen through a stub proxy) that were reported as finished loads and added to `proxy_bytes`, enough to bring a run noticeably closer to `--proxy-budget-mb`. Only `http(s)` requests and responses are counted now.
+
 ## [0.2.0] — 2026-10-16
 
 > **Behaviour changes in this batch:**
