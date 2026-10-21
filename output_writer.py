@@ -33,6 +33,8 @@ from dataclasses import dataclass, asdict, field, fields
 from datetime import datetime, timezone
 from typing import Optional, List, Set, Sequence, Any, Type
 
+import proxy_meter
+
 
 # The hostname a row came from. MediaMarkt is one platform across ten
 # country sites (plus MediaWorld in Italy, which is the same company and the
@@ -423,10 +425,12 @@ def write_failed_attempt(out_prefix: str, *, stop_reason: str, mode: str,
                     mode=mode, source=source)
     meta.update(blocked=False, transport_error=transport_error,
                 data_updated=False)
+    meta.update(proxy_meter.sidecar())  # proxy_bytes / proxy_budget_bytes / proxy_budget_exceeded
     path = f"{out_prefix}{ATTEMPT_META_SUFFIX}"
     with _atomic(path) as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[+] Wrote attempt metadata -> {path} (status=failed)")
+    proxy_meter.report()
     return path
 
 
@@ -572,7 +576,13 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
     # fix: 28 of 32 repos behaved this way. Same shape as the exit-code
     # unification this file already carries — a rule keyed on a list of
     # names has a hole for every name nobody added to it.
+    meter = proxy_meter.current()
+    if meter.exceeded:
+        # The run stopped itself at --proxy-budget-mb: rows kept -> 6, none
+        # -> 5, whatever the pages it did fetch said (a block included).
+        stop_reason, blocked = proxy_meter.STOP_REASON, False
     complete = stop_reason in COMPLETE_STOP_REASONS and not pages_failed
+    extra = {**proxy_meter.sidecar(), **(extra or {})}
     row_cls = ROW_CLASS_BY_MODE.get(mode, Product)
     write_stats: dict = {}
     rc = save(rows, out_prefix, fmt, allow_empty=allow_empty, row_cls=row_cls,
@@ -596,6 +606,21 @@ def finish_run(rows: Sequence[Any], out_prefix: str, fmt: str,
             pages_failed=pages_failed, mode=mode, source=source,
             start_url=start_url, final_url=final_url, products=len(rows),
             extra=extra))
+
+    if not wrote_output and meter.active:
+        # Nothing is written, but what the proxy carried is still recorded
+        # (`<out>.latest_attempt.meta.json`; data and .meta.json untouched).
+        attempt = run_meta(status="blocked" if blocked else ("failed" if not complete else "empty"),
+                           stop_reason=stop_reason, pages_requested=pages_requested,
+                           pages_completed=pages_completed, pages_failed=pages_failed, mode=mode,
+                           source=source, start_url=start_url, final_url=final_url, products=0,
+                           extra=extra)
+        attempt.update(blocked=bool(blocked), data_updated=False)
+        path = f"{out_prefix}{ATTEMPT_META_SUFFIX}"
+        with _atomic(path) as f:
+            json.dump(attempt, f, ensure_ascii=False, indent=2)
+        print(f"[+] Wrote attempt metadata -> {path} (status={attempt['status']})")
+    proxy_meter.report()
 
     if not rows:
         # Nothing gathered at all, and WHY decides the code. The three

@@ -337,10 +337,10 @@ live connection — several `pid`s, one run each, is the way.
 
 ### Traffic through a paid proxy
 
-A residential proxy bills per byte, so two things happen only while a LOCAL
+A residential proxy bills per byte, so three things happen only while a LOCAL
 browser goes through `--proxy` / `--proxy-file` (or `MEDIAMARKT_PROXY`).
-Neither applies with `--cdp-endpoint`: that remote browser brings its own exit
-and is billed on its own side. Neither applies with no proxy either, because
+None applies with `--cdp-endpoint`: that remote browser brings its own exit
+and is billed on its own side. None applies with no proxy either, because
 then nothing is metered.
 
 **Pre-check before the browser starts.** All three engines send ONE
@@ -379,6 +379,34 @@ route is installed, so repeated assets in one run are fetched again (scripts
 and stylesheets, which are not blocked). `<out>.meta.json` records
 `media_blocked`.
 
+**Traffic budget.** Every byte the browser sends or receives through the
+proxy is counted, and `--proxy-budget-mb` (default `10`; `0` = unlimited)
+caps the run. Once the running total passes it, no new page, retry, exit
+rotation or captcha solve is started (with `--concurrency`, no worker takes
+another page; pages already loading finish), the browser aborts any request
+it still tries, the rows already read are kept, and the run ends with
+`stop_reason: proxy_budget_exceeded`: exit `6` with rows, `5` without (a
+block on the last page included). It never goes on silently. A proxied run
+prints one line at the end, e.g. `Proxy traffic: 3.2 MB of 10 MB budget`, and
+the sidecar records `proxy_bytes`, `proxy_budget_bytes` and
+`proxy_budget_exceeded` (`null` / `null` / `false` with no local proxy), plus
+`pages_unattempted` after a stop. A proxied run that writes no rows records
+them in `<out>.latest_attempt.meta.json`, leaving the data and
+`<out>.meta.json` as they were.
+
+The count is an estimate of the tunnelled payload: request line, headers and
+body sent, response headers and body as received. TLS records, the `CONNECT`
+exchange, WebSocket frames and Chrome's own background requests are not
+visible to it, so the proxy's bill is a few per cent higher. 1 MB = 1,000,000
+bytes. The pre-check's `HEAD` is counted; the canary's separate preflight
+script is not (it is another process).
+
+| Engine | Counted from |
+|---|---|
+| Playwright | `request.sizes()` of every finished or failed request |
+| pyppeteer | CDP `Network.loadingFinished.encodedDataLength` of every response that came over the network, plus each request's line, headers and body |
+| Selenium | the same CDP events, from Chrome's performance log |
+
 Live comparison, 2026-10-20: one category page through Playwright with no
 proxy, once as it is and once with blocking forced on, to compare the rows.
 It was not possible from this datacentre address: both runs got the site's
@@ -398,8 +426,8 @@ only the HTML and the script were fetched, and the script still ran.
 | `2` | Bad usage (including a URL that is not a MediaMarkt host) |
 | `3` | Blocked — the 403 refusal, or a challenge |
 | `4` | Zero products — including a hub category, which is a correct answer |
-| `5` | The content was never obtained — a remote API error, a navigation timeout, a dead or unauthenticated proxy (a gateway `407`/`402` at the pre-check stops here before a browser starts). No data was written |
-| `6` | Partial — some pages fetched, then stopped early |
+| `5` | The content was never obtained — a remote API error, a navigation timeout, a dead or unauthenticated proxy (a gateway `407`/`402` at the pre-check stops here before a browser starts), or `--proxy-budget-mb` spent before any row (`proxy_budget_exceeded`). No data was written |
+| `6` | Partial — some pages fetched, then stopped early (including `proxy_budget_exceeded`) |
 
 **A run that finds nothing writes nothing.** Last night's good output is not
 replaced with `[]`; `--allow-empty` is the opt-out. A consumer cannot tell an

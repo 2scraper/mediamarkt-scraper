@@ -413,6 +413,26 @@ def proxy_precheck(args, proxy_url: Optional[str]) -> Optional[int]:
     return None
 
 
+def start_proxy_meter(args, pool):
+    """Meter this run's traffic when it goes through a LOCAL proxy (not over
+    --cdp-endpoint, not without a proxy). Returns the run's ProxyMeter."""
+    import proxy_meter
+    active = bool(pool) and not getattr(args, "cdp_endpoint", None)
+    return proxy_meter.start(getattr(args, "proxy_budget_mb", proxy_meter.DEFAULT_BUDGET_MB),
+                             active=active)
+
+
+def budget_extra(outcomes, args) -> dict:
+    """Sidecar keys for a run that --proxy-budget-mb stopped: the pages that
+    were planned but never asked for (not failed pages)."""
+    import proxy_meter
+    if not proxy_meter.exceeded():
+        return {}
+    attempted = {o.page_num for o in outcomes}
+    pages = getattr(args, "pages", 1) if getattr(args, "mode", "listing") == "listing" else 1
+    return {"pages_unattempted": [n for n in range(1, pages + 1) if n not in attempted]}
+
+
 def add_media_flags(parser) -> None:
     """`--load-media` (documented) and the hidden `--force-block-media`."""
     parser.add_argument(
@@ -425,3 +445,5 @@ def add_media_flags(parser) -> None:
     # measured for free. Not a user feature.
     parser.add_argument("--force-block-media", action="store_true",
                         help=_argparse.SUPPRESS)
+    import proxy_meter
+    proxy_meter.add_budget_argument(parser)

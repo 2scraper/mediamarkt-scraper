@@ -73,6 +73,7 @@ from product_parser import (parse_products, parse_product_detail,
                             total_results, HOSTS, unsupported_reason)
 from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
+import proxy_meter
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
 import proxy_pool
 from proxy_pool import (from_args as proxy_pool_from_args, to_playwright, mask,
@@ -322,6 +323,10 @@ def _launch_local(pw, args, pool):
         # Images, video and fonts through a metered proxy, read by no parser
         # here. On the context, so every page and every relaunch gets it.
         context.route("**/*", proxy_pool.playwright_media_route)
+    if proxy:
+        # Counted for --proxy-budget-mb; registered after the media route, so
+        # it is asked first and aborts everything once the budget is spent.
+        proxy_meter.current().attach_playwright(context)
     return browser, context, context.new_page()
 
 
@@ -617,6 +622,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         load_failed, exit_failed = False, None
         status = None
         for attempt in range(1, args.retries + 1):
+            if proxy_meter.exceeded():
+                load_failed = True  # --proxy-budget-mb: no further navigation
+                break
             try:
                 response = session.page.goto(url, wait_until="domcontentloaded",
                                              timeout=60000)
@@ -645,7 +653,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                    args.retries, pause)
                     time.sleep(pause)
 
-        if exit_failed and block_attempt < block_retries:
+        if exit_failed and block_attempt < block_retries and not proxy_meter.exceeded():
             logger.warning("Exit %s is unusable (%s) — rotating to another "
                            "one (%d/%d).", mask(pool.current), exit_failed,
                            block_attempt + 1, block_retries)
@@ -655,7 +663,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         if load_failed:
             break
 
-        if handle_captcha_if_present(session.page, args, budget):
+        if not proxy_meter.exceeded() and handle_captcha_if_present(session.page, args, budget):
             # A solve navigated the page. Give the destination a moment
             # before judging what came back, and forget the status of the
             # page the solve replaced: it describes the challenge, not this.
@@ -679,7 +687,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # the URL, so retrying it unchanged would only confirm it. Measured
         # 2026-09-09 — the same URL that answers 403 from a datacentre exit
         # answers 200 from a residential one.
-        if block_attempt < block_retries:
+        if block_attempt < block_retries and not proxy_meter.exceeded():
             logger.warning("Page %d came back as %s from %s — retrying from "
                            "another exit (%d/%d).", page_num, state,
                            mask(pool.current), block_attempt + 1, block_retries)
@@ -899,7 +907,9 @@ def _fetch_pages_concurrently(args, pool, specs, concurrency: int):
                 session = _BrowserSession(pw, args, _worker_pool(pool, index)).open()
                 try:
                     first = True
-                    while not exhausted.is_set():
+                    # A spent --proxy-budget-mb stops every worker from taking
+                    # another page; what is left in `work` is unattempted.
+                    while not exhausted.is_set() and not proxy_meter.exceeded():
                         try:
                             page_num, url = work.get_nowait()
                         except queue.Empty:
@@ -996,6 +1006,7 @@ def scrape(args) -> int:
 
     # Before any browser exists: a proxy that refuses its credential (407) or
     # has no traffic left (402) would refuse every request the browser makes.
+    page_flow.start_proxy_meter(args, pool)
     stop = page_flow.proxy_precheck(args, pool.current if pool else None)
     if stop is not None:
         return stop
@@ -1058,6 +1069,8 @@ def scrape(args) -> int:
                     url = (planned[0] if planned else
                            _next_url_from_page(session.page, args, 1))
                     for page_num in range(2, args.pages + 1):
+                        if proxy_meter.exceeded():
+                            break  # --proxy-budget-mb: no further page
                         # A new exit per page is what actually spreads a run's
                         # volume, and it costs a browser relaunch: carrying the
                         # session across exits would defeat the point.
@@ -1154,7 +1167,8 @@ def scrape(args) -> int:
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
                       start_url=args.url, final_url=final_url,
-                      extra={"media_blocked": media_blocked})
+                      extra={"media_blocked": media_blocked,
+                             **page_flow.budget_extra(outcomes, args)})
 
 
 def parse_args():
