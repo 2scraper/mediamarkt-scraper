@@ -217,6 +217,16 @@ jobs:
       - name: The ${{ matrix.engine }} CLI answers --help
         run: .venv/bin/python ${{ matrix.engine }}_scraper.py --help >/dev/null
 
+      - name: Install Chromium (Playwright only; the runner's Chrome serves the other two)
+        if: matrix.engine == 'playwright'
+        run: .venv/bin/python -m playwright install --with-deps chromium
+
+      - name: The proxy meter against a stub proxy, in a real browser
+        # A missing browser fails this job instead of skipping.
+        env:
+          PROXY_METER_REQUIRE: ${{ matrix.engine == 'puppeteer' && 'pyppeteer' || matrix.engine }}
+        run: .venv/bin/python -m unittest -v tests.test_proxy_meter
+
   # The Dockerfile ships a runnable image and NOTHING was building it, which
   # is how it came to be broken: `proxy_pool.py` was left out of the COPY
   # list while the entrypoint imports it at module level, so the container

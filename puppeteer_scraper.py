@@ -63,6 +63,7 @@ from product_parser import (parse_products, parse_product_detail,
                             total_results, HOSTS, unsupported_reason)
 from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
+import proxy_meter
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
 import proxy_pool
 from proxy_pool import (from_args as proxy_pool_from_args, mask, ROTATE_MODES,
@@ -260,6 +261,9 @@ class _Session:
             # fonts are paused, and each is failed. page.setRequestInterception
             # relies on a CDP method current Chromium no longer implements.
             self.bridge.run(proxy_pool.pyppeteer_block_media(self.page))
+        if self.pool:
+            # --proxy-budget-mb: count this page's traffic over its own CDP session.
+            self.bridge.run(proxy_meter.current().attach_pyppeteer(self.page))
         return self
 
     def relaunch(self):
@@ -446,6 +450,9 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         load_failed = False
         status = None
         for attempt in range(1, args.retries + 1):
+            if proxy_meter.exceeded():
+                load_failed = True  # --proxy-budget-mb: no further navigation
+                break
             try:
                 response = bridge.run(page.goto(url, {"waitUntil": "domcontentloaded",
                                                       "timeout": 60000}))
@@ -472,7 +479,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                    args.retries, text[:120], pause)
                     time.sleep(pause)
 
-        if load_failed and block_attempt < block_retries:
+        if load_failed and block_attempt < block_retries and not proxy_meter.exceeded():
             pool.advance("unusable exit or repeated load failure")
             session.relaunch()
             bridge, page = session.bridge, session.page
@@ -482,7 +489,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             break
 
 
-        if handle_captcha_if_present(session, args, budget):
+        if not proxy_meter.exceeded() and handle_captcha_if_present(session, args, budget):
             time.sleep(1)
             status = None  # the status described the page the solve replaced
 
@@ -500,7 +507,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Blocked or challenged. The ADDRESS is what was scored, not the URL,
         # so a different exit is the only thing that plausibly changes the
         # outcome.
-        if block_attempt < block_retries:
+        if block_attempt < block_retries and not proxy_meter.exceeded():
             logger.warning("Page %d came back as %s from %s — retrying from "
                            "another exit (%d/%d).", page_num, state,
                            mask(pool.current), block_attempt + 1, block_retries)
@@ -654,6 +661,7 @@ def scrape(args) -> int:
 
     # Before any browser exists: a proxy that refuses its credential (407) or
     # has no traffic left (402) would refuse every request the browser makes.
+    page_flow.start_proxy_meter(args, pool)
     stop = page_flow.proxy_precheck(args, pool.current if pool else None)
     if stop is not None:
         return stop
@@ -699,6 +707,8 @@ def scrape(args) -> int:
             url = (planned[0] if planned else
                    (_next_page_href(session) or page_url(session.page.url, 2)))
             for page_num in range(2, args.pages + 1):
+                if proxy_meter.exceeded():
+                    break  # --proxy-budget-mb: no further page
                 if pool and pool.rotates_per_page():
                     pool.advance(f"per-page rotation, page {page_num}")
                     session.relaunch()
@@ -774,7 +784,8 @@ def scrape(args) -> int:
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
                       start_url=args.url, final_url=final_url,
-                      extra={"media_blocked": media_blocked})
+                      extra={"media_blocked": media_blocked,
+                             **page_flow.budget_extra(outcomes, args)})
 
 
 def parse_args():

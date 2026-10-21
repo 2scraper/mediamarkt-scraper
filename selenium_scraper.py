@@ -66,6 +66,7 @@ from product_parser import (parse_products, parse_product_detail,
                             total_results, HOSTS, unsupported_reason)
 from output_writer import dedupe_by_key, finish_run, open_private
 import page_flow
+import proxy_meter
 from page_flow import NEXT_PAGE_SELECTOR, MIN_CARD_MATCHES
 import proxy_pool
 from proxy_pool import (from_args as proxy_pool_from_args, mask, ROTATE_MODES,
@@ -214,7 +215,13 @@ class _Session:
                     "likely refuse them. Use playwright_scraper.py or "
                     "puppeteer_scraper.py for an authenticated proxy.")
 
+        metered = bool(self.pool) and proxy_meter.current().active
+        if metered:
+            # --proxy-budget-mb counts from Chrome's performance log.
+            proxy_meter.selenium_logging_prefs(options)
         self.driver = webdriver.Chrome(options=options)
+        if metered:
+            proxy_meter.current().attach_selenium(self.driver, keep_entries=False)
         self._apply_timeouts()
         self.media_blocked = False
         if proxy_pool.should_block_media(self.args, proxy_in_use=bool(self.pool)):
@@ -279,6 +286,7 @@ class _Session:
     def close(self):
         try:
             if self.driver is not None:
+                proxy_meter.current().poll_selenium(self.driver)  # what the last page still loaded
                 # quit(), not close(): close() ends one window and leaves the
                 # driver process running, which on a per-page rotation would
                 # leak a chromedriver per page.
@@ -470,11 +478,16 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         logger.info("Fetching page %d/%d: %s", page_num, args.pages, url)
         load_failed, exit_failed = False, None
         for attempt in range(1, args.retries + 1):
+            if proxy_meter.exceeded():
+                load_failed = True  # --proxy-budget-mb: no further navigation
+                break
             try:
                 session.driver.get(url)
+                proxy_meter.current().poll_selenium(session.driver)
                 load_failed = False
                 break
             except (TimeoutException, WebDriverException) as e:
+                proxy_meter.current().poll_selenium(session.driver)
                 text = str(e)
                 reason = next((m for m in _PROXY_ERROR_MARKERS if m in text), "")
                 load_failed = True
@@ -488,7 +501,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
                                    args.retries, text[:120], pause)
                     time.sleep(pause)
 
-        if exit_failed and block_attempt < block_retries:
+        if exit_failed and block_attempt < block_retries and not proxy_meter.exceeded():
             logger.warning("Exit %s is unusable (%s) — rotating to another "
                            "one (%d/%d).", mask(pool.current), exit_failed,
                            block_attempt + 1, block_retries)
@@ -500,9 +513,10 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
             break
 
 
-        if handle_captcha_if_present(session, args, budget):
+        if not proxy_meter.exceeded() and handle_captcha_if_present(session, args, budget):
             time.sleep(1)
 
+        proxy_meter.current().poll_selenium(session.driver)
         html = d["content"]() or ""
         # status=None on purpose: driver.get() returns nothing and Selenium
         # exposes no HTTP status, so this engine relies on the text and
@@ -521,7 +535,7 @@ def _fetch_one_page(session, args, pool, page_num: int, url: str) -> PageOutcome
         # Blocked or challenged. The ADDRESS is what was scored, not the URL,
         # so a different exit is the only thing that plausibly changes the
         # outcome.
-        if block_attempt < block_retries:
+        if block_attempt < block_retries and not proxy_meter.exceeded():
             logger.warning("Page %d came back as %s from %s — retrying from "
                            "another exit (%d/%d).", page_num, state,
                            mask(pool.current), block_attempt + 1, block_retries)
@@ -672,6 +686,7 @@ def scrape(args) -> int:
     # has no traffic left (402) would refuse every request the browser makes.
     # Checked with the URL as configured, credentials included: the question
     # is whether the proxy account itself is refused or exhausted.
+    page_flow.start_proxy_meter(args, pool)
     stop = page_flow.proxy_precheck(args, pool.current if pool else None)
     if stop is not None:
         return stop
@@ -714,6 +729,8 @@ def scrape(args) -> int:
                    (_next_page_href(session)
                     or page_url(session.driver.current_url, 2)))
             for page_num in range(2, args.pages + 1):
+                if proxy_meter.exceeded():
+                    break  # --proxy-budget-mb: no further page
                 if pool and pool.rotates_per_page():
                     pool.advance(f"per-page rotation, page {page_num}")
                     session.relaunch()
@@ -788,7 +805,8 @@ def scrape(args) -> int:
                       pages_failed=failed_pages, mode=args.mode,
                       source=site_host(final_url),
                       start_url=args.url, final_url=final_url,
-                      extra={"media_blocked": media_blocked})
+                      extra={"media_blocked": media_blocked,
+                             **page_flow.budget_extra(outcomes, args)})
 
 
 def parse_args():
