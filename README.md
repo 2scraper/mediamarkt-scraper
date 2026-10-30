@@ -1,4 +1,4 @@
-# mediamarkt-scraper
+# MediaMarkt Scraper — Product Prices, Ratings and Stock in Python
 
 [![release](https://img.shields.io/github/v/release/2scraper/mediamarkt-scraper?sort=semver)](https://github.com/2scraper/mediamarkt-scraper/releases)
 [![tests](https://github.com/2scraper/mediamarkt-scraper/actions/workflows/tests.yml/badge.svg)](https://github.com/2scraper/mediamarkt-scraper/actions/workflows/tests.yml)
@@ -7,6 +7,8 @@
 [![licence](https://img.shields.io/badge/licence-MIT-lightgrey)](LICENSE)
 [![engines](https://img.shields.io/badge/engines-Playwright%20%7C%20Selenium%20%7C%20pyppeteer%20%7C%20CDP-informational)](#engines)
 [![needs a residential IP](https://img.shields.io/badge/needs-a%20residential%20IP-orange)](#the-one-thing-you-actually-need)
+
+**MediaMarkt scraper** — an open-source (MIT) Python tool that reads category grids, search results and product pages on MediaMarkt's ten country sites and writes prices, manufacturer's recommended prices, 30-day lowest prices, ratings, stock and EAN to JSON or CSV. Measured on 2026-09-09, MediaMarkt refused every datacentre and VPN address, and each country site was served from a residential exit in its own country. Use it for price monitoring across countries, or compare two runs with `diff_runs.py`.
 
 Scrapes MediaMarkt category grids, search results and product pages across the
 group's ten country sites. JSON or CSV, one row schema for both modes, and
@@ -512,3 +514,20 @@ listings; it does not attempt to reach anything behind an account.
 MIT licensed — see [LICENSE](LICENSE).
 
 Built by [2Captcha](https://2captcha.com).
+
+## Guides
+
+- [How to run the 2scraper scrapers: setup, proxies, exit codes and access modes](https://2captcha.com/h/how-to-run-2scraper-open-source-scrapers) — installation, `.env`, `.meta.json` for the whole family.
+
+## Related scrapers
+
+Same CLI conventions, same output contract (one row per item, JSON or CSV, a `.meta.json` sidecar and shared exit codes):
+
+- [Montblanc scraper](https://github.com/2scraper/montblanc-scraper) — Per-market prices, stock, collections and full variant…
+- [Pottery Barn scraper](https://github.com/2scraper/potterybarn-scraper) — Every product in a Pottery Barn category, and every SKU's…
+- [Rakuten Ichiba scraper](https://github.com/2scraper/rakuten-scraper) — Japan's largest marketplace
+- [SHEIN scraper](https://github.com/2scraper/shein-scraper) — us.shein.com search, category and product pages…
+- [Sleep Number scraper](https://github.com/2scraper/sleepnumber-scraper) — Smart beds, mattresses and bedding from sleepnumber.com
+- [StockX scraper](https://github.com/2scraper/stockx-scraper) — Search results, category listings and product pages
+
+All scrapers: [github.com/2scraper](https://github.com/2scraper) · Need another site? [Open a request](https://github.com/2scraper/.github/issues/new?title=%5BScraper%20request%5D%20)
