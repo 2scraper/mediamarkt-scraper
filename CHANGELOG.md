@@ -57,6 +57,8 @@ with it, so nobody discovers it from a bill or from a diff.
 
 ### Changed
 
+- CI only: the offline-checks job runs on `ubuntu-24.04` instead of `ubuntu-latest`, which moved to Ubuntu 26.04, where `actions/setup-python` has no Python 3.9 build. 3.9 stays the supported floor.
+- Docker: the image installs `libatomic1` before Playwright. Recent Playwright releases' Node driver needs it to run `playwright install` at all, and the slim base image does not ship it, so the image build failed.
 - CI only: the canary bills the `MEDIAMARKT_PROXY` exit, so it now runs weekly
   (Mondays 06:23 UTC) instead of daily; a manual dispatch still runs it.
 
